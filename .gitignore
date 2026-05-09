@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+backend/venv/
+
+# Environment
+.env
+backend/.env
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Uploads
+uploads/
+backend/uploads/
+
+# Contract documents (sensitive data)
+Hoteller/
+
+# Logs
+*.log
+
+# Misc
+*.jsx
