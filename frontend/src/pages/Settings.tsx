@@ -23,6 +23,24 @@ interface AppSettings {
   avg_confidence_score: number | null;
 }
 
+interface GmailSettings {
+  gmail_email: string;
+  gmail_app_password_display: string;
+  gmail_imap_host: string;
+  gmail_imap_port: number;
+  gmail_poll_interval_minutes: number;
+  gmail_poll_enabled: boolean;
+}
+
+interface GmailForm {
+  gmail_email: string;
+  gmail_app_password: string;
+  gmail_imap_host: string;
+  gmail_imap_port: number;
+  gmail_poll_interval_minutes: number;
+  gmail_poll_enabled: boolean;
+}
+
 function StatusDot({ ok }: { ok: boolean }) {
   return (
     <span
@@ -103,10 +121,43 @@ function confidenceBadge(score: number | null) {
   return <Badge text={`${score}`} color="#f44336" />;
 }
 
+const inputStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 6,
+  border: "1px solid #ddd",
+  fontSize: "0.85rem",
+  width: 220,
+};
+
+const btnStyle: React.CSSProperties = {
+  padding: "8px 20px",
+  borderRadius: 6,
+  border: "none",
+  background: "#1a1a2e",
+  color: "#fff",
+  fontSize: "0.85rem",
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
 export default function Settings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Gmail editing
+  const [gmailForm, setGmailForm] = useState<GmailForm>({
+    gmail_email: "",
+    gmail_app_password: "",
+    gmail_imap_host: "imap.gmail.com",
+    gmail_imap_port: 993,
+    gmail_poll_interval_minutes: 15,
+    gmail_poll_enabled: false,
+  });
+  const [gmailPasswordDisplay, setGmailPasswordDisplay] = useState("");
+  const [gmailEditing, setGmailEditing] = useState(false);
+  const [gmailSaving, setGmailSaving] = useState(false);
+  const [gmailMsg, setGmailMsg] = useState("");
 
   useEffect(() => {
     api
@@ -114,7 +165,40 @@ export default function Settings() {
       .then(({ data }) => setSettings(data))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+
+    // Load Gmail settings
+    api.get<GmailSettings>("/settings/gmail").then(({ data }) => {
+      setGmailForm({
+        gmail_email: data.gmail_email,
+        gmail_app_password: "",
+        gmail_imap_host: data.gmail_imap_host,
+        gmail_imap_port: data.gmail_imap_port,
+        gmail_poll_interval_minutes: data.gmail_poll_interval_minutes,
+        gmail_poll_enabled: data.gmail_poll_enabled,
+      });
+      setGmailPasswordDisplay(data.gmail_app_password_display);
+    });
   }, []);
+
+  const saveGmail = async () => {
+    setGmailSaving(true);
+    setGmailMsg("");
+    try {
+      const { data } = await api.put<GmailSettings>("/settings/gmail", gmailForm);
+      setGmailPasswordDisplay(data.gmail_app_password_display);
+      setGmailForm((f) => ({ ...f, gmail_app_password: "" }));
+      setGmailEditing(false);
+      setGmailMsg("Saved");
+      // Refresh main settings to update status dot
+      const updated = await api.get<AppSettings>("/settings");
+      setSettings(updated.data);
+      setTimeout(() => setGmailMsg(""), 3000);
+    } catch (err) {
+      setGmailMsg("Failed to save");
+    } finally {
+      setGmailSaving(false);
+    }
+  };
 
   if (loading)
     return (
@@ -186,23 +270,144 @@ export default function Settings() {
 
         {/* Gmail Polling */}
         <Card title="Gmail Polling">
-          <Row
-            label="Status"
-            value={
-              <>
-                <StatusDot ok={settings.gmail_enabled} />
-                {settings.gmail_enabled ? "Active" : "Disabled"}
-              </>
-            }
-          />
-          <Row
-            label="Email"
-            value={settings.gmail_email || <span style={{ color: "#999" }}>Not set</span>}
-          />
-          <Row
-            label="Poll interval"
-            value={`${settings.gmail_poll_interval_minutes} min`}
-          />
+          {!gmailEditing ? (
+            <>
+              <Row
+                label="Status"
+                value={
+                  <>
+                    <StatusDot ok={settings.gmail_enabled} />
+                    {settings.gmail_enabled ? "Active" : "Disabled"}
+                  </>
+                }
+              />
+              <Row
+                label="Email"
+                value={settings.gmail_email || <span style={{ color: "#999" }}>Not set</span>}
+              />
+              <Row
+                label="App Password"
+                value={
+                  gmailPasswordDisplay ? (
+                    <code style={{ fontSize: "0.8rem" }}>{gmailPasswordDisplay}</code>
+                  ) : (
+                    <span style={{ color: "#999" }}>Not set</span>
+                  )
+                }
+              />
+              <Row label="IMAP Host" value={gmailForm.gmail_imap_host} />
+              <Row label="IMAP Port" value={gmailForm.gmail_imap_port} />
+              <Row
+                label="Poll interval"
+                value={`${settings.gmail_poll_interval_minutes} min`}
+              />
+              <div style={{ marginTop: "1rem", display: "flex", alignItems: "center", gap: 10 }}>
+                <button style={btnStyle} onClick={() => setGmailEditing(true)}>
+                  Edit
+                </button>
+                {gmailMsg && (
+                  <span style={{ color: gmailMsg === "Saved" ? "#4caf50" : "#f44336", fontSize: "0.85rem" }}>
+                    {gmailMsg}
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Enabled toggle */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ color: "#666", fontSize: "0.9rem" }}>Enabled</span>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={gmailForm.gmail_poll_enabled}
+                    onChange={(e) => setGmailForm({ ...gmailForm, gmail_poll_enabled: e.target.checked })}
+                    style={{ width: 18, height: 18 }}
+                  />
+                  <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>
+                    {gmailForm.gmail_poll_enabled ? "Active" : "Disabled"}
+                  </span>
+                </label>
+              </div>
+              {/* Email */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ color: "#666", fontSize: "0.9rem" }}>Email</span>
+                <input
+                  type="email"
+                  style={inputStyle}
+                  value={gmailForm.gmail_email}
+                  onChange={(e) => setGmailForm({ ...gmailForm, gmail_email: e.target.value })}
+                  placeholder="user@gmail.com"
+                />
+              </div>
+              {/* App Password */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ color: "#666", fontSize: "0.9rem" }}>App Password</span>
+                <input
+                  type="password"
+                  style={inputStyle}
+                  value={gmailForm.gmail_app_password}
+                  onChange={(e) => setGmailForm({ ...gmailForm, gmail_app_password: e.target.value })}
+                  placeholder={gmailPasswordDisplay || "Enter app password"}
+                />
+              </div>
+              {/* IMAP Host */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ color: "#666", fontSize: "0.9rem" }}>IMAP Host</span>
+                <input
+                  type="text"
+                  style={inputStyle}
+                  value={gmailForm.gmail_imap_host}
+                  onChange={(e) => setGmailForm({ ...gmailForm, gmail_imap_host: e.target.value })}
+                />
+              </div>
+              {/* IMAP Port */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ color: "#666", fontSize: "0.9rem" }}>IMAP Port</span>
+                <input
+                  type="number"
+                  style={{ ...inputStyle, width: 100 }}
+                  value={gmailForm.gmail_imap_port}
+                  onChange={(e) => setGmailForm({ ...gmailForm, gmail_imap_port: parseInt(e.target.value) || 993 })}
+                />
+              </div>
+              {/* Poll Interval */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0", borderBottom: "1px solid #f0f0f0" }}>
+                <span style={{ color: "#666", fontSize: "0.9rem" }}>Poll interval (min)</span>
+                <input
+                  type="number"
+                  style={{ ...inputStyle, width: 100 }}
+                  value={gmailForm.gmail_poll_interval_minutes}
+                  min={1}
+                  onChange={(e) => setGmailForm({ ...gmailForm, gmail_poll_interval_minutes: parseInt(e.target.value) || 15 })}
+                />
+              </div>
+              {/* Buttons */}
+              <div style={{ marginTop: "1rem", display: "flex", gap: 10, alignItems: "center" }}>
+                <button
+                  style={{ ...btnStyle, background: "#4caf50" }}
+                  onClick={saveGmail}
+                  disabled={gmailSaving}
+                >
+                  {gmailSaving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  style={{ ...btnStyle, background: "#999" }}
+                  onClick={() => {
+                    setGmailEditing(false);
+                    setGmailMsg("");
+                  }}
+                >
+                  Cancel
+                </button>
+                {gmailMsg && (
+                  <span style={{ color: gmailMsg === "Saved" ? "#4caf50" : "#f44336", fontSize: "0.85rem" }}>
+                    {gmailMsg}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </Card>
 
         {/* CMR Integration */}
@@ -280,9 +485,10 @@ export default function Settings() {
           color: "#e65100",
         }}
       >
-        Settings are configured via environment variables in{" "}
+        Most settings are configured via environment variables in{" "}
         <code>backend/.env</code>. See <code>backend/.env.example</code> for all
-        available options. Changes require a server restart.
+        available options. Gmail polling can be edited above and takes effect
+        immediately. Other changes require a server restart.
       </div>
     </div>
   );

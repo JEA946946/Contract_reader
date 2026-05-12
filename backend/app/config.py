@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     def gmail_configured(self) -> bool:
         return bool(self.gmail_email and self.gmail_app_password and self.gmail_poll_enabled)
 
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "validate_assignment": True}
 
 
 settings = Settings()

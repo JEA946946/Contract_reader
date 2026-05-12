@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -9,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import Document, ExtractionFeedback
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -42,6 +47,51 @@ class AppSettings(BaseModel):
     documents_with_hash: int
     total_feedback_entries: int
     avg_confidence_score: Optional[float]
+
+
+class GmailSettingsUpdate(BaseModel):
+    gmail_email: str = ""
+    gmail_app_password: str = ""  # empty string = keep existing
+    gmail_imap_host: str = "imap.gmail.com"
+    gmail_imap_port: int = 993
+    gmail_poll_interval_minutes: int = 15
+    gmail_poll_enabled: bool = False
+
+
+class GmailSettingsResponse(BaseModel):
+    gmail_email: str
+    gmail_app_password_display: str
+    gmail_imap_host: str
+    gmail_imap_port: int
+    gmail_poll_interval_minutes: int
+    gmail_poll_enabled: bool
+
+
+def _update_env_file(updates: dict[str, str]) -> None:
+    """Update or add keys in the backend .env file."""
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+
+    updated_keys: set[str] = set()
+    new_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0]
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}")
+                updated_keys.add(key)
+                continue
+        new_lines.append(line)
+
+    # Append keys that weren't already in the file
+    for key, value in updates.items():
+        if key not in updated_keys:
+            new_lines.append(f"{key}={value}")
+
+    env_path.write_text("\n".join(new_lines) + "\n")
 
 
 def _mask_key(key: str) -> str:
@@ -104,3 +154,83 @@ def get_settings(db: Session = Depends(get_db)):
         total_feedback_entries=total_feedback,
         avg_confidence_score=avg_conf,
     )
+
+
+@router.get("/gmail", response_model=GmailSettingsResponse)
+def get_gmail_settings():
+    return GmailSettingsResponse(
+        gmail_email=settings.gmail_email or "",
+        gmail_app_password_display=_mask_key(settings.gmail_app_password) if settings.gmail_app_password else "",
+        gmail_imap_host=settings.gmail_imap_host,
+        gmail_imap_port=settings.gmail_imap_port,
+        gmail_poll_interval_minutes=settings.gmail_poll_interval_minutes,
+        gmail_poll_enabled=settings.gmail_poll_enabled,
+    )
+
+
+@router.put("/gmail", response_model=GmailSettingsResponse)
+def update_gmail_settings(body: GmailSettingsUpdate):
+    # Determine actual password (keep existing if blank submitted)
+    actual_password = body.gmail_app_password if body.gmail_app_password else settings.gmail_app_password
+
+    # Update runtime settings
+    settings.gmail_email = body.gmail_email
+    settings.gmail_app_password = actual_password
+    settings.gmail_imap_host = body.gmail_imap_host
+    settings.gmail_imap_port = body.gmail_imap_port
+    settings.gmail_poll_interval_minutes = body.gmail_poll_interval_minutes
+    settings.gmail_poll_enabled = body.gmail_poll_enabled
+
+    # Persist to .env file
+    env_updates = {
+        "GMAIL_EMAIL": body.gmail_email,
+        "GMAIL_IMAP_HOST": body.gmail_imap_host,
+        "GMAIL_IMAP_PORT": str(body.gmail_imap_port),
+        "GMAIL_POLL_INTERVAL_MINUTES": str(body.gmail_poll_interval_minutes),
+        "GMAIL_POLL_ENABLED": str(body.gmail_poll_enabled).lower(),
+    }
+    if body.gmail_app_password:
+        env_updates["GMAIL_APP_PASSWORD"] = body.gmail_app_password
+    _update_env_file(env_updates)
+
+    # Restart scheduler job with new interval
+    _reschedule_gmail_polling()
+
+    logger.info("Gmail settings updated (email=%s, enabled=%s, interval=%d min)",
+                body.gmail_email, body.gmail_poll_enabled, body.gmail_poll_interval_minutes)
+
+    return GmailSettingsResponse(
+        gmail_email=settings.gmail_email,
+        gmail_app_password_display=_mask_key(settings.gmail_app_password) if settings.gmail_app_password else "",
+        gmail_imap_host=settings.gmail_imap_host,
+        gmail_imap_port=settings.gmail_imap_port,
+        gmail_poll_interval_minutes=settings.gmail_poll_interval_minutes,
+        gmail_poll_enabled=settings.gmail_poll_enabled,
+    )
+
+
+def _reschedule_gmail_polling() -> None:
+    """Add, update, or remove the Gmail polling scheduler job based on current settings."""
+    from app.services.scheduler import get_scheduler, _run_poll
+
+    scheduler = get_scheduler()
+    if scheduler is None:
+        return
+
+    # Remove existing job if present
+    try:
+        scheduler.remove_job("gmail_poll")
+    except Exception:
+        pass
+
+    # Add job if configured
+    if settings.gmail_configured:
+        scheduler.add_job(
+            _run_poll,
+            "interval",
+            minutes=settings.gmail_poll_interval_minutes,
+            id="gmail_poll",
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info("Gmail polling rescheduled — every %d minutes", settings.gmail_poll_interval_minutes)
