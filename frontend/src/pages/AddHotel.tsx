@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   createHotelWithPrices,
@@ -781,7 +781,7 @@ export default function AddHotel() {
             `"${a.season}" (${fmt(a.from)} – ${fmt(a.to)})\noverlaps with\n"${b.season}" (${fmt(b.from)} – ${fmt(b.to)})\n\n` +
             `Seasons are not allowed to overlap. Please fix the dates before saving.`
           );
-          setActiveTab("seasons");
+          setActiveTab("prices");
           return;
         }
       }

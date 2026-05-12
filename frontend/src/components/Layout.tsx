@@ -26,6 +26,7 @@ export default function Layout() {
           { to: "/transportation", label: "Transportation" },
           { to: "/hotels", label: "Hotels" },
           { to: "/add-hotel", label: "Add Hotel" },
+          { to: "/settings", label: "Settings" },
         ].map(({ to, label }) => (
           <NavLink
             key={to}

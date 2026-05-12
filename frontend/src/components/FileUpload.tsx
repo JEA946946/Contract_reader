@@ -101,14 +101,6 @@ export default function FileUpload({ label, accentColor, onResult }: {
 
         try {
           // Upload phase: 0-50% via onUploadProgress
-          const uploadDone = new Promise<void>((resolve) => {
-            const checkUpload = setInterval(() => {
-              // Wait until filePercent reaches ~50 (upload complete)
-              resolve();
-              clearInterval(checkUpload);
-            }, 100);
-          });
-
           let uploadComplete = false;
           const res = await uploadDocument(file, (percent) => {
             setFilePercent(percent);
@@ -133,6 +125,7 @@ export default function FileUpload({ label, accentColor, onResult }: {
             message: "Upload failed",
             rows: [],
             menu_rows: [],
+            transport_rows: [],
             document_category: "hotel",
           });
         }

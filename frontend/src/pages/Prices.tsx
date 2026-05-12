@@ -84,7 +84,7 @@ export default function Prices() {
     setImporting(true);
     try {
       const result = await uploadDocument(file);
-      navigate(`/review/${result.document_id}`);
+      navigate(`/review/${result.id}`);
     } catch (err) {
       alert("Import failed: " + (err instanceof Error ? err.message : "Unknown error"));
       setImporting(false);

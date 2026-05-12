@@ -14,3 +14,4 @@ python-dotenv==1.0.1
 pydantic-settings==2.7.1
 extract-msg==0.52.0
 APScheduler==3.10.4
+gunicorn==23.0.0

@@ -2,9 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func, text
 
+from app.config import settings
 from app.database import engine, Base, get_db, SessionLocal
 from app.models import Document, Hotel, Price, Restaurant, MenuPrice, TransportCompany, TransportPrice, Folder
-from app.routers import documents, prices, exports, hotels, email_polling, restaurants, transportation, folders, suppliers
+from app.routers import documents, prices, exports, hotels, email_polling, restaurants, transportation, folders, suppliers, settings as settings_router
 from app.schemas import StatsOut, DocumentOut
 from app.services.scheduler import start_scheduler, stop_scheduler
 
@@ -12,7 +13,7 @@ app = FastAPI(title="Hotel Price Reader", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:5174", "http://localhost:8005"],
+    allow_origins=settings.allowed_origins.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,6 +28,7 @@ app.include_router(restaurants.router)
 app.include_router(transportation.router)
 app.include_router(folders.router)
 app.include_router(suppliers.router)
+app.include_router(settings_router.router)
 
 
 @app.on_event("startup")

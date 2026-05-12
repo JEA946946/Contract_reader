@@ -18,7 +18,7 @@ import type {
 } from "../types";
 
 const api = axios.create({
-  baseURL: "http://localhost:8005/api",
+  baseURL: import.meta.env.VITE_API_URL || "/api",
 });
 
 export async function uploadDocument(
@@ -191,7 +191,7 @@ export async function triggerPollNow(): Promise<{ message: string }> {
 }
 
 export function getDocumentFileUrl(documentId: number): string {
-  return `http://localhost:8005/api/documents/${documentId}/file`;
+  return `${api.defaults.baseURL}/documents/${documentId}/file`;
 }
 
 export function getExportUrl(
@@ -203,7 +203,7 @@ export function getExportUrl(
   if (filters.hotel_name) params.set("hotel_name", filters.hotel_name);
   if (filters.season_code) params.set("season_code", filters.season_code);
   const query = params.toString();
-  return `http://localhost:8005/api/export/${format}${query ? `?${query}` : ""}`;
+  return `${api.defaults.baseURL}/export/${format}${query ? `?${query}` : ""}`;
 }
 
 // --- Restaurant API ---

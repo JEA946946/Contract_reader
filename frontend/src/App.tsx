@@ -12,6 +12,7 @@ import Transportation from "./pages/Transportation";
 import AddHotel from "./pages/AddHotel";
 import Hotels from "./pages/Hotels";
 import Contracts from "./pages/Contracts";
+import Settings from "./pages/Settings";
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
           <Route path="/hotels" element={<Hotels />} />
           <Route path="/add-hotel" element={<AddHotel />} />
           <Route path="/edit-hotel/:hotelId" element={<AddHotel />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </BrowserRouter>

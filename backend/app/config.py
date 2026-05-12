@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     cmr_api_base: str = ""
     cmr_api_token: str = ""
 
+    allowed_origins: str = "http://localhost:5173,http://localhost:3000,http://localhost:5174,http://localhost:8005"
+
     # AI parser settings
     ai_validation_pass_enabled: bool = False  # Set True to re-enable separate Pass 3
 
