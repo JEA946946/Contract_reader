@@ -175,6 +175,7 @@ def normalize_season_code(code: str | None) -> str | None:
 def get_or_create_hotel(
     db: Session, name: str, city: str, stars: int | None, hotel_type: str | None,
     address: str | None = None, phone: str | None = None, email: str | None = None,
+    country: str | None = None, postal_code: str | None = None, state: str | None = None,
     cmr_supplier_id: str | None = None,
 ) -> Hotel:
     stmt = select(Hotel).where(Hotel.name == name, Hotel.city == city)
@@ -190,6 +191,12 @@ def get_or_create_hotel(
             hotel.phone = phone
         if email and not hotel.email:
             hotel.email = email
+        if country and not hotel.country:
+            hotel.country = country
+        if postal_code and not hotel.postal_code:
+            hotel.postal_code = postal_code
+        if state and not hotel.state:
+            hotel.state = state
         if cmr_supplier_id and not hotel.cmr_supplier_id:
             hotel.cmr_supplier_id = cmr_supplier_id
         return hotel
@@ -197,6 +204,7 @@ def get_or_create_hotel(
     hotel = Hotel(
         name=name, city=city, stars=stars, type=hotel_type,
         address=address, phone=phone, email=email,
+        country=country, postal_code=postal_code, state=state,
         cmr_supplier_id=cmr_supplier_id,
     )
     db.add(hotel)

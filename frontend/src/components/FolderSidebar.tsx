@@ -11,25 +11,46 @@ import {
 type SelectedFolder =
   | { type: "all" }
   | { type: "unfiled" }
-  | { type: "folder"; id: number };
+  | { type: "folder"; id: number }
+  | { type: "status"; status: string };
+
+interface StatusCounts {
+  pending_review: number;
+  completed: number;
+  failed: number;
+  zero_rows: number;
+  processing: number;
+}
 
 interface FolderSidebarProps {
   selected: SelectedFolder;
   onSelect: (sel: SelectedFolder) => void;
   unfiledCount?: number;
+  totalCount?: number;
   compact?: boolean;
   /** Called after a drag-drop move so parent can refresh */
   onDocumentMoved?: () => void;
+  statusCounts?: StatusCounts;
 }
 
 export type { SelectedFolder };
+
+const STATUS_ITEMS: { key: string; label: string; bg: string; color: string }[] = [
+  { key: "pending_review", label: "Pending Review", bg: "#e3f2fd", color: "#1565c0" },
+  { key: "completed", label: "Completed", bg: "#e8f5e9", color: "#2e7d32" },
+  { key: "failed", label: "Failed", bg: "#ffebee", color: "#c62828" },
+  { key: "zero_rows", label: "0 Rows", bg: "#fff3e0", color: "#e65100" },
+  { key: "processing", label: "Processing", bg: "#fff3e0", color: "#e65100" },
+];
 
 export default function FolderSidebar({
   selected,
   onSelect,
   unfiledCount,
+  totalCount,
   compact = false,
   onDocumentMoved,
+  statusCounts,
 }: FolderSidebarProps) {
   const [tree, setTree] = useState<Folder[]>([]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -116,7 +137,7 @@ export default function FolderSidebar({
   const countAll = (folders: Folder[]): number =>
     folders.reduce((sum, f) => sum + f.document_count + countAll(f.children), 0);
   const totalInFolders = countAll(tree);
-  const totalDocs = totalInFolders + (unfiledCount ?? 0);
+  const totalDocs = totalCount ?? (totalInFolders + (unfiledCount ?? 0));
 
   const renderFolder = (folder: Folder, depth: number) => {
     const isExpanded = expanded.has(folder.id);
@@ -147,8 +168,8 @@ export default function FolderSidebar({
             alignItems: "center",
             gap: "6px",
             fontSize: compact ? "0.78rem" : "0.83rem",
-            background: isSelected ? "rgba(233,69,96,0.15)" : "transparent",
-            color: isSelected ? "#e94560" : "#ccc",
+            background: isSelected ? "rgba(105,108,255,0.1)" : "transparent",
+            color: isSelected ? "#696cff" : "#555",
             borderRadius: 4,
             whiteSpace: "nowrap",
             overflow: "hidden",
@@ -176,10 +197,10 @@ export default function FolderSidebar({
               onClick={(e) => e.stopPropagation()}
               style={{
                 flex: 1,
-                background: "#2a2a4a",
-                border: "1px solid #e94560",
+                background: "#fff",
+                border: "1px solid #696cff",
                 borderRadius: 3,
-                color: "#fff",
+                color: "#333",
                 fontSize: "0.8rem",
                 padding: "1px 4px",
                 outline: "none",
@@ -203,10 +224,10 @@ export default function FolderSidebar({
             <span
               style={{
                 fontSize: "0.68rem",
-                background: "rgba(255,255,255,0.1)",
+                background: "#f0f0f0",
                 padding: "0 5px",
                 borderRadius: 8,
-                color: "#999",
+                color: "#888",
                 flexShrink: 0,
               }}
             >
@@ -233,10 +254,10 @@ export default function FolderSidebar({
               }}
               placeholder="Folder name..."
               style={{
-                background: "#2a2a4a",
-                border: "1px solid #e94560",
+                background: "#fff",
+                border: "1px solid #696cff",
                 borderRadius: 3,
-                color: "#fff",
+                color: "#333",
                 fontSize: "0.8rem",
                 padding: "2px 6px",
                 outline: "none",
@@ -254,8 +275,9 @@ export default function FolderSidebar({
       style={{
         width,
         minWidth: width,
-        background: "#1a1a2e",
-        borderRadius: compact ? 8 : 10,
+        background: "#f5f5f5",
+        border: "none",
+        borderRadius: 0,
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -267,21 +289,21 @@ export default function FolderSidebar({
       <div
         style={{
           padding: compact ? "8px 10px" : "12px 14px",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          borderBottom: "1px solid #e8e8e8",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
         }}
       >
-        <span style={{ color: "#fff", fontWeight: 600, fontSize: compact ? "0.85rem" : "0.95rem" }}>
+        <span style={{ color: "#333", fontWeight: 600, fontSize: compact ? "0.85rem" : "0.95rem" }}>
           Folders
         </span>
         <button
           onClick={() => { setCreatingIn("root"); setNewFolderName(""); }}
           style={{
-            background: "rgba(233,69,96,0.2)",
+            background: "rgba(105,108,255,0.12)",
             border: "none",
-            color: "#e94560",
+            color: "#696cff",
             cursor: "pointer",
             borderRadius: 4,
             padding: "2px 8px",
@@ -303,9 +325,9 @@ export default function FolderSidebar({
             padding: compact ? "4px 10px" : "6px 14px",
             cursor: "pointer",
             fontSize: compact ? "0.78rem" : "0.83rem",
-            color: selected.type === "all" ? "#e94560" : "#ccc",
+            color: selected.type === "all" ? "#696cff" : "#555",
             fontWeight: selected.type === "all" ? 600 : 400,
-            background: selected.type === "all" ? "rgba(233,69,96,0.15)" : "transparent",
+            background: selected.type === "all" ? "rgba(105,108,255,0.1)" : "transparent",
             borderRadius: 4,
             display: "flex",
             alignItems: "center",
@@ -319,6 +341,55 @@ export default function FolderSidebar({
           </span>
         </div>
 
+        {/* Status filters */}
+        {statusCounts && STATUS_ITEMS.map((item) => {
+          const count = statusCounts[item.key as keyof StatusCounts];
+          const isActive = selected.type === "status" && selected.status === item.key;
+          return (
+            <div
+              key={item.key}
+              onClick={() => onSelect({ type: "status", status: item.key })}
+              style={{
+                padding: compact ? "3px 10px 3px 28px" : "4px 14px 4px 32px",
+                cursor: "pointer",
+                fontSize: compact ? "0.73rem" : "0.78rem",
+                color: isActive ? item.color : "#888",
+                fontWeight: isActive ? 600 : 400,
+                background: isActive ? item.bg : "transparent",
+                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <span style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: item.color,
+                flexShrink: 0,
+                opacity: isActive ? 1 : 0.5,
+              }} />
+              {item.label}
+              {count > 0 && (
+                <span style={{
+                  marginLeft: "auto",
+                  fontSize: "0.65rem",
+                  background: isActive ? item.color : "#e8e8e8",
+                  color: isActive ? "#fff" : "#888",
+                  padding: "0 5px",
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  minWidth: 16,
+                  textAlign: "center",
+                }}>
+                  {count}
+                </span>
+              )}
+            </div>
+          );
+        })}
+
         {/* Unfiled */}
         <div
           onClick={() => onSelect({ type: "unfiled" })}
@@ -329,9 +400,9 @@ export default function FolderSidebar({
             padding: compact ? "4px 10px" : "6px 14px",
             cursor: "pointer",
             fontSize: compact ? "0.78rem" : "0.83rem",
-            color: selected.type === "unfiled" ? "#e94560" : "#ccc",
+            color: selected.type === "unfiled" ? "#696cff" : "#555",
             fontWeight: selected.type === "unfiled" ? 600 : 400,
-            background: selected.type === "unfiled" ? "rgba(233,69,96,0.15)" : "transparent",
+            background: selected.type === "unfiled" ? "rgba(105,108,255,0.1)" : "transparent",
             borderRadius: 4,
             display: "flex",
             alignItems: "center",
@@ -348,7 +419,7 @@ export default function FolderSidebar({
         </div>
 
         {/* Divider */}
-        <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "4px 10px" }} />
+        <div style={{ height: 1, background: "#e8e8e8", margin: "4px 10px" }} />
 
         {/* Creating root folder inline */}
         {creatingIn === "root" && (
@@ -364,10 +435,10 @@ export default function FolderSidebar({
               }}
               placeholder="Folder name..."
               style={{
-                background: "#2a2a4a",
-                border: "1px solid #e94560",
+                background: "#fff",
+                border: "1px solid #696cff",
                 borderRadius: 3,
-                color: "#fff",
+                color: "#333",
                 fontSize: "0.8rem",
                 padding: "2px 6px",
                 outline: "none",
@@ -390,13 +461,13 @@ export default function FolderSidebar({
             position: "fixed",
             left: contextMenu.x,
             top: contextMenu.y,
-            background: "#2a2a4a",
-            border: "1px solid rgba(255,255,255,0.15)",
+            background: "#fff",
+            border: "1px solid #e8e8e8",
             borderRadius: 6,
             padding: "4px 0",
             zIndex: 9999,
             minWidth: 140,
-            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -424,7 +495,7 @@ export default function FolderSidebar({
                 handleDelete(contextMenu.folderId);
                 setContextMenu(null);
               },
-              color: "#e94560",
+              color: "#c62828",
             },
           ].map((item) => (
             <div
@@ -434,9 +505,9 @@ export default function FolderSidebar({
                 padding: "6px 14px",
                 cursor: "pointer",
                 fontSize: "0.8rem",
-                color: item.color || "#ccc",
+                color: item.color || "#555",
               }}
-              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "rgba(255,255,255,0.08)"; }}
+              onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#f5f5f5"; }}
               onMouseLeave={(e) => { (e.target as HTMLElement).style.background = "transparent"; }}
             >
               {item.label}
@@ -448,8 +519,8 @@ export default function FolderSidebar({
       {/* Drag-over style injection */}
       <style>{`
         .folder-drag-over {
-          outline: 2px dashed #e94560 !important;
-          background: rgba(233,69,96,0.1) !important;
+          outline: 2px dashed #696cff !important;
+          background: rgba(105,108,255,0.08) !important;
         }
       `}</style>
     </div>

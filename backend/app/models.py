@@ -59,6 +59,9 @@ class Hotel(Base):
     address: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     phone: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    postal_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     source_document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("documents.id"), nullable=True)
     cmr_supplier_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
@@ -202,8 +205,46 @@ class ProcessedEmail(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     status: Mapped[str] = mapped_column(String(20), default="processed")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    body_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    body_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    attachment_names: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
 
     document: Mapped[Optional["Document"]] = relationship()
+
+
+# Valid email labels
+EMAIL_LABELS = ["accommodation", "restaurant", "transportation", "entrees", "packages"]
+
+
+class EmailFolderRule(Base):
+    __tablename__ = "email_folder_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    keyword: Mapped[str] = mapped_column(String(255), nullable=False)
+    folder_id: Mapped[int] = mapped_column(ForeignKey("folders.id", ondelete="CASCADE"), nullable=False)
+    is_case_sensitive: Mapped[bool] = mapped_column(default=False)
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    folder: Mapped["Folder"] = relationship()
+
+
+class ManagedCity(Base):
+    __tablename__ = "managed_cities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ManagedCategory(Base):
+    __tablename__ = "managed_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ExtractionFeedback(Base):

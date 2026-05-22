@@ -1,0 +1,66 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: hotelprice_reader_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-hotelprice_secret}
+      MYSQL_DATABASE: hotelprice_reader
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - dmc-cmr-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: hotelprice_reader_redis
+    restart: unless-stopped
+    networks:
+      - dmc-cmr-network
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: hotelprice_reader_app
+    container_name: hotelprice_reader_app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:-hotelprice_secret}@hotelprice_reader_mysql:3306/hotelprice_reader
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - UPLOAD_DIR=uploads
+      - GMAIL_EMAIL=${GMAIL_EMAIL}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
+      - GMAIL_POLL_ENABLED=${GMAIL_POLL_ENABLED:-true}
+      - ALLOWED_ORIGINS=https://reader.vmmorocco.com
+      - CMR_API_BASE=http://dmc_cmr_django_local_django:8000/api/v1
+      - CMR_API_TOKEN=${CMR_API_TOKEN:-}
+      - REDIS_URL=redis://hotelprice_reader_redis:6379
+    volumes:
+      - uploads_data:/app/uploads
+      - claude_config:/home/appuser/.claude
+    networks:
+      - dmc-cmr-network
+
+volumes:
+  mysql_data:
+    driver: local
+  uploads_data:
+    driver: local
+  claude_config:
+    driver: local
+
+networks:
+  dmc-cmr-network:
+    external: true
+    name: dmc-cmr_dmc-cmr-network

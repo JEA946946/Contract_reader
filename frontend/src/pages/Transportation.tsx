@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getTransportPrices, getTransportCities, getTransportCompanies, deleteTransportCompany } from "../api/client";
+import { Link, useNavigate } from "react-router-dom";
+import { getTransportPrices, getTransportCities, getTransportCompanies, deleteTransportCompany, pushTransportToCmr } from "../api/client";
 import type { TransportPrice } from "../types";
 
 const TYPE_CHIPS: { value: string; label: string; color: string; textColor: string }[] = [
@@ -28,6 +29,10 @@ export default function Transportation() {
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<number>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pushingId, setPushingId] = useState<number | null>(null);
+  const [snackbar, setSnackbar] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const navigate = useNavigate();
   const pageSize = 50;
 
   useEffect(() => {
@@ -86,6 +91,43 @@ export default function Transportation() {
     setRefreshKey((k) => k + 1);
   };
 
+  const handleDeleteSingle = async (tp: TransportPrice) => {
+    if (!confirm(`Delete "${tp.company.name}" and all its prices?`)) return;
+    setDeletingId(tp.company.id);
+    try {
+      await deleteTransportCompany(tp.company.id);
+      setRefreshKey((k) => k + 1);
+    } catch {
+      setSnackbar({ msg: "Failed to delete transport company", ok: false });
+      setTimeout(() => setSnackbar(null), 4000);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handlePush = async (tp: TransportPrice) => {
+    setPushingId(tp.company.id);
+    try {
+      const res = await pushTransportToCmr(tp.company.id);
+      setSnackbar({ msg: res.message, ok: true });
+      if (res.cmr_supplier_id) {
+        setPrices((prev) =>
+          prev.map((p) =>
+            p.company.id === tp.company.id
+              ? { ...p, company: { ...p.company, cmr_supplier_id: res.cmr_supplier_id } }
+              : p
+          )
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Push failed";
+      setSnackbar({ msg, ok: false });
+    } finally {
+      setPushingId(null);
+      setTimeout(() => setSnackbar(null), 4000);
+    }
+  };
+
   const typeLabel = (stype: string | null) => {
     const found = TYPE_CHIPS.find((t) => t.value === stype);
     return found ? found : TYPE_CHIPS[0];
@@ -95,19 +137,31 @@ export default function Transportation() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "1rem" }}>
         <h2 style={{ margin: 0 }}>Transportation Prices</h2>
-        {selectedCompanyIds.size > 0 && (
-          <button
-            onClick={handleDeleteSelected}
-            disabled={deleting}
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          {selectedCompanyIds.size > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleting}
+              style={{
+                background: "#e53935", color: "#fff", border: "none", padding: "0.45rem 1rem",
+                borderRadius: 6, cursor: deleting ? "default" : "pointer", fontWeight: 600,
+                fontSize: "0.65rem", opacity: deleting ? 0.6 : 1,
+              }}
+            >
+              {deleting ? "Deleting..." : `Delete ${selectedCompanyIds.size} company${selectedCompanyIds.size > 1 ? "ies" : "y"}`}
+            </button>
+          )}
+          <Link
+            to="/add-transport"
             style={{
-              background: "#e53935", color: "#fff", border: "none", padding: "0.45rem 1rem",
-              borderRadius: 6, cursor: deleting ? "default" : "pointer", fontWeight: 600,
-              fontSize: "0.65rem", opacity: deleting ? 0.6 : 1,
+              background: "#2e7d32", color: "#fff", padding: "0.45rem 1rem",
+              borderRadius: 6, textDecoration: "none", fontWeight: 600,
+              fontSize: "0.65rem",
             }}
           >
-            {deleting ? "Deleting..." : `Delete ${selectedCompanyIds.size} company${selectedCompanyIds.size > 1 ? "ies" : "y"}`}
-          </button>
-        )}
+            + Add Transport
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -179,7 +233,7 @@ export default function Transportation() {
             <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", fontSize: "0.75rem" }}>
               <thead>
                 <tr>
-                  {["", "Code", "Price", "Company", "Product", "Bus Size", "Type", "Days", "Route", "Note", "City"].map((h) => (
+                  {["", "Actions", "Code", "Price", "Company", "Product", "Bus Size", "Type", "Days", "Route", "Note", "City"].map((h) => (
                     <th key={h} style={{ padding: "0.5rem", textAlign: "left", background: "#2e7d32", color: "#fff", fontSize: "0.65rem", whiteSpace: "nowrap" }}>
                       {h}
                     </th>
@@ -197,6 +251,81 @@ export default function Transportation() {
                           checked={selectedCompanyIds.has(tp.company.id)}
                           onChange={() => toggleCompany(tp.company.id)}
                         />
+                      </td>
+                      <td style={{ padding: "4px 6px" }}>
+                        <div style={{ display: "flex", gap: "3px", flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => navigate(`/edit-transport/${tp.company.id}`)}
+                            style={{
+                              background: "none",
+                              border: "1px solid #6366f1",
+                              color: "#6366f1",
+                              borderRadius: 4,
+                              padding: "2px 6px",
+                              cursor: "pointer",
+                              fontSize: "0.6rem",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handlePush(tp)}
+                            disabled={pushingId === tp.company.id}
+                            style={{
+                              background: "none",
+                              border: `1px solid ${tp.company.cmr_supplier_id ? "#059669" : "#2563eb"}`,
+                              color: tp.company.cmr_supplier_id ? "#059669" : "#2563eb",
+                              borderRadius: 4,
+                              padding: "2px 6px",
+                              cursor: pushingId === tp.company.id ? "default" : "pointer",
+                              fontSize: "0.6rem",
+                              opacity: pushingId === tp.company.id ? 0.6 : 1,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {pushingId === tp.company.id
+                              ? "..."
+                              : tp.company.cmr_supplier_id
+                                ? "Update"
+                                : "Push"}
+                          </button>
+                          {tp.company.cmr_supplier_id && (
+                            <a
+                              href="https://crm.vmmorocco.com/suppliers?category=Transport"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                border: "1px solid #059669",
+                                color: "#059669",
+                                borderRadius: 4,
+                                padding: "2px 6px",
+                                fontSize: "0.6rem",
+                                textDecoration: "none",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              CRM
+                            </a>
+                          )}
+                          <button
+                            onClick={() => handleDeleteSingle(tp)}
+                            disabled={deletingId === tp.company.id}
+                            style={{
+                              background: "none",
+                              border: "1px solid #e94560",
+                              color: "#e94560",
+                              borderRadius: 4,
+                              padding: "2px 6px",
+                              cursor: deletingId === tp.company.id ? "default" : "pointer",
+                              fontSize: "0.6rem",
+                              opacity: deletingId === tp.company.id ? 0.6 : 1,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {deletingId === tp.company.id ? "..." : "Delete"}
+                          </button>
+                        </div>
                       </td>
                       <td style={{ padding: "4px 6px", fontFamily: "monospace", fontSize: "0.7rem" }}>{tp.code ?? "-"}</td>
                       <td style={{ padding: "4px 6px", fontWeight: 600 }}>
@@ -251,6 +380,26 @@ export default function Transportation() {
             </div>
           )}
         </>
+      )}
+
+      {snackbar && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "0.75rem 1.25rem",
+            borderRadius: 8,
+            background: snackbar.ok ? "#059669" : "#dc2626",
+            color: "#fff",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+            zIndex: 9999,
+          }}
+        >
+          {snackbar.msg}
+        </div>
       )}
     </div>
   );

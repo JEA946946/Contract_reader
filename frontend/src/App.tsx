@@ -10,8 +10,11 @@ import TransportReview from "./pages/TransportReview";
 import Restaurants from "./pages/Restaurants";
 import Transportation from "./pages/Transportation";
 import AddHotel from "./pages/AddHotel";
+import AddRestaurant from "./pages/AddRestaurant";
+import AddTransport from "./pages/AddTransport";
 import Hotels from "./pages/Hotels";
 import Contracts from "./pages/Contracts";
+import EmailInbox from "./pages/EmailInbox";
 import Settings from "./pages/Settings";
 
 function App() {
@@ -23,12 +26,17 @@ function App() {
           <Route path="/upload" element={<Upload />} />
           <Route path="/contracts" element={<Contracts />} />
           <Route path="/review" element={<ReviewList />} />
+          <Route path="/email" element={<EmailInbox />} />
           <Route path="/review/:documentId" element={<Review />} />
           <Route path="/review-restaurant/:documentId" element={<RestaurantReview />} />
           <Route path="/review-transportation/:documentId" element={<TransportReview />} />
           <Route path="/prices" element={<Prices />} />
           <Route path="/restaurants" element={<Restaurants />} />
+          <Route path="/add-restaurant" element={<AddRestaurant />} />
+          <Route path="/edit-restaurant/:restaurantId" element={<AddRestaurant />} />
           <Route path="/transportation" element={<Transportation />} />
+          <Route path="/add-transport" element={<AddTransport />} />
+          <Route path="/edit-transport/:companyId" element={<AddTransport />} />
           <Route path="/documents" element={<Navigate to="/review" replace />} />
           <Route path="/hotels" element={<Hotels />} />
           <Route path="/add-hotel" element={<AddHotel />} />

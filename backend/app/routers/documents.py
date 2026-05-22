@@ -55,7 +55,7 @@ def _compute_content_hash(file_path: Path) -> str:
 
 
 def _extract_entity_name(doc: Document) -> Optional[str]:
-    """Extract unique hotel/restaurant name(s) from cached parsed rows."""
+    """Extract unique hotel/restaurant name(s) from cached parsed rows, including city."""
     if not doc.parsed_rows_json:
         return None
     try:
@@ -66,7 +66,16 @@ def _extract_entity_name(doc: Document) -> Optional[str]:
             names = list(dict.fromkeys(r.get("company_name") for r in rows if r.get("company_name")))
         else:
             names = list(dict.fromkeys(r.get("accommodation") for r in rows if r.get("accommodation")))
-        return ", ".join(names) if names else None
+        if not names:
+            return None
+        label = ", ".join(names)
+        # Append city from first row that has one
+        for row in rows:
+            city = (row.get("city") or "").strip()
+            if city:
+                label = f"{label}, {city}"
+                break
+        return label
     except Exception:
         return None
 
@@ -617,6 +626,80 @@ def get_document_file(document_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{document_id}/attachments")
+def list_document_attachments(document_id: int, db: Session = Depends(get_db)):
+    """List attachments in an email document (.eml/.msg)."""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    upload_path = settings.upload_path / document.filename
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    if document.file_type not in ("eml", "msg"):
+        # Non-email: return the document itself as the single "attachment"
+        return [{"index": 0, "filename": document.filename, "content_type": "application/pdf" if document.file_type == "pdf" else "application/octet-stream"}]
+
+    import email
+    from email import policy as email_policy
+    msg = email.message_from_bytes(upload_path.read_bytes(), policy=email_policy.default)
+    attachments = []
+    idx = 0
+    for part in msg.walk():
+        disposition = str(part.get("Content-Disposition", ""))
+        if "attachment" in disposition or (part.get_content_type() == "application/pdf" and part.get_filename()):
+            fname = part.get_filename() or f"attachment_{idx}"
+            import mimetypes
+            ct = part.get_content_type() or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+            attachments.append({"index": idx, "filename": fname, "content_type": ct})
+            idx += 1
+    return attachments
+
+
+@router.get("/{document_id}/attachments/{att_index}")
+def get_document_attachment(document_id: int, att_index: int, db: Session = Depends(get_db)):
+    """Serve a specific attachment from an email document."""
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    upload_path = settings.upload_path / document.filename
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    if document.file_type not in ("eml", "msg"):
+        # Non-email: serve the file itself if index 0
+        if att_index != 0:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        import mimetypes
+        content_type = mimetypes.guess_type(document.filename)[0] or "application/octet-stream"
+        return FileResponse(path=upload_path, media_type=content_type, headers={"Content-Disposition": f'inline; filename="{document.filename}"'})
+
+    import email
+    from email import policy as email_policy
+    msg = email.message_from_bytes(upload_path.read_bytes(), policy=email_policy.default)
+    idx = 0
+    for part in msg.walk():
+        disposition = str(part.get("Content-Disposition", ""))
+        if "attachment" in disposition or (part.get_content_type() == "application/pdf" and part.get_filename()):
+            if idx == att_index:
+                fname = part.get_filename() or f"attachment_{idx}"
+                data = part.get_payload(decode=True)
+                if not data:
+                    raise HTTPException(status_code=404, detail="Empty attachment")
+                import mimetypes
+                import tempfile
+                ct = part.get_content_type() or mimetypes.guess_type(fname)[0] or "application/octet-stream"
+                suffix = Path(fname).suffix
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+                tmp.write(data)
+                tmp.close()
+                return FileResponse(path=tmp.name, media_type=ct, headers={"Content-Disposition": f'inline; filename="{fname}"'})
+            idx += 1
+    raise HTTPException(status_code=404, detail="Attachment not found")
+
+
 @router.post("/{document_id}/ai-reparse", response_model=UploadForReviewResponse)
 def ai_reparse_document(document_id: int, db: Session = Depends(get_db)):
     """Force re-parse a document using the category-appropriate AI parser."""
@@ -839,6 +922,75 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
     return {"message": "Document deleted"}
 
 
+class BatchReparseRequest(BaseModel):
+    filter: str  # "failed" or "zero_rows"
+
+
+@router.post("/batch-reparse")
+def batch_reparse_documents(body: BatchReparseRequest, db: Session = Depends(get_db)):
+    """Batch reprocess failed or zero-row documents."""
+    from app.services.auto_retry import MAX_RETRIES, _get_retry_count
+
+    BATCH_CAP = 20
+
+    if body.filter == "failed":
+        candidates = (
+            db.query(Document)
+            .filter(Document.status == "failed")
+            .order_by(Document.upload_date.desc())
+            .limit(BATCH_CAP * 2)
+            .all()
+        )
+        # Filter by retry count
+        eligible = []
+        for doc in candidates:
+            if _get_retry_count(doc.notes) < MAX_RETRIES:
+                upload_path = settings.upload_path / doc.filename
+                if upload_path.exists():
+                    eligible.append(doc)
+            if len(eligible) >= BATCH_CAP:
+                break
+        skipped = len(candidates) - len(eligible)
+
+    elif body.filter == "zero_rows":
+        candidates = (
+            db.query(Document)
+            .filter(
+                Document.status.in_(("pending_review", "completed", "failed")),
+                (Document.row_count == 0) | (Document.row_count.is_(None)),
+            )
+            .order_by(Document.upload_date.desc())
+            .limit(BATCH_CAP * 2)
+            .all()
+        )
+        eligible = []
+        for doc in candidates:
+            upload_path = settings.upload_path / doc.filename
+            if upload_path.exists():
+                eligible.append(doc)
+            if len(eligible) >= BATCH_CAP:
+                break
+        skipped = len(candidates) - len(eligible)
+
+    else:
+        raise HTTPException(status_code=400, detail="filter must be 'failed' or 'zero_rows'")
+
+    # Queue each for reprocessing
+    for doc in eligible:
+        doc.status = "processing"
+        doc.notes = (doc.notes or "") + " | Batch reprocess"
+    db.commit()
+
+    for doc in eligible:
+        _parse_executor.submit(parse_document_background, doc.id)
+
+    return {
+        "queued": len(eligible),
+        "skipped": skipped,
+        "message": f"Queued {len(eligible)} documents for reprocessing, skipped {skipped}",
+    }
+
+
 class UpdateDocumentEntityRequest(BaseModel):
     entity_name: str
     city: str
@@ -851,11 +1003,13 @@ def update_document_entity(document_id: int, body: UpdateDocumentEntityRequest, 
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    if not doc.parsed_rows_json:
-        raise HTTPException(status_code=400, detail="Document has no parsed data")
-
-    rows = json.loads(doc.parsed_rows_json)
     category = doc.document_category or "hotel"
+
+    if doc.parsed_rows_json:
+        rows = json.loads(doc.parsed_rows_json)
+    else:
+        # Create a minimal row so the entity name and city are stored
+        rows = [{}]
 
     # Update name and city in all rows
     for row in rows:
@@ -868,6 +1022,9 @@ def update_document_entity(document_id: int, body: UpdateDocumentEntityRequest, 
         row["city"] = body.city
 
     doc.parsed_rows_json = json.dumps(rows)
+    # Clear folder so auto-assign can re-evaluate based on the new city
+    if body.city.strip():
+        doc.folder_id = None
     auto_assign_folder(doc, db)
     db.commit()
 

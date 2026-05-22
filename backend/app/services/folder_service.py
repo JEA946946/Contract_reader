@@ -23,6 +23,10 @@ CATEGORY_LABELS = {
 
 def auto_assign_folder(document: Document, db: Session) -> None:
     """Read parsed_rows_json, extract city, and assign to Category → City folder."""
+    # Don't overwrite folder if already assigned (e.g. by keyword rules)
+    if document.folder_id is not None:
+        return
+
     if not document.parsed_rows_json:
         return
 

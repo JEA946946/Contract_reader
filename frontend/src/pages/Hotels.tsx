@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { listHotels, deleteHotel } from "../api/client";
+import { listHotels, deleteHotel, pushHotelToCmr } from "../api/client";
 import type { Hotel } from "../types";
 
 type SortKey = "id" | "name" | "city" | "stars" | "type";
@@ -12,6 +12,8 @@ export default function Hotels() {
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>("id");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [pushingId, setPushingId] = useState<number | null>(null);
+  const [snackbar, setSnackbar] = useState<{ msg: string; ok: boolean } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -71,6 +73,28 @@ export default function Hotels() {
       setHotels((prev) => prev.filter((h) => h.id !== hotel.id));
     } catch {
       alert("Failed to delete hotel");
+    }
+  };
+
+  const handlePush = async (hotel: Hotel) => {
+    setPushingId(hotel.id);
+    try {
+      const res = await pushHotelToCmr(hotel.id);
+      setSnackbar({ msg: res.message, ok: true });
+      // Update local state with the cmr_supplier_id
+      if (res.cmr_supplier_id) {
+        setHotels((prev) =>
+          prev.map((h) =>
+            h.id === hotel.id ? { ...h, cmr_supplier_id: res.cmr_supplier_id } : h
+          )
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Push failed";
+      setSnackbar({ msg, ok: false });
+    } finally {
+      setPushingId(null);
+      setTimeout(() => setSnackbar(null), 4000);
     }
   };
 
@@ -165,7 +189,7 @@ export default function Hotels() {
               ))}
               <th style={thStyle}>Email</th>
               <th style={thStyle}>Phone</th>
-              <th style={{ ...thStyle, width: 80 }}>Actions</th>
+              <th style={{ ...thStyle, width: 140 }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -195,7 +219,51 @@ export default function Hotels() {
                 <td style={tdStyle}>{hotel.type || "-"}</td>
                 <td style={tdStyle}>{hotel.email || "-"}</td>
                 <td style={tdStyle}>{hotel.phone || "-"}</td>
-                <td style={tdStyle}>
+                <td style={{ ...tdStyle, display: "flex", gap: "0.3rem" }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePush(hotel);
+                    }}
+                    disabled={pushingId === hotel.id}
+                    style={{
+                      background: "none",
+                      border: `1px solid ${hotel.cmr_supplier_id ? "#059669" : "#2563eb"}`,
+                      color: hotel.cmr_supplier_id ? "#059669" : "#2563eb",
+                      borderRadius: 6,
+                      padding: "0.25rem 0.6rem",
+                      cursor: pushingId === hotel.id ? "default" : "pointer",
+                      fontSize: "0.6rem",
+                      opacity: pushingId === hotel.id ? 0.6 : 1,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {pushingId === hotel.id
+                      ? "Syncing..."
+                      : hotel.cmr_supplier_id
+                        ? "Update CRM"
+                        : "Push to CRM"}
+                  </button>
+                  {hotel.cmr_supplier_id && (
+                    <a
+                      href="https://crm.vmmorocco.com/suppliers?category=Accommodation"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        background: "none",
+                        border: "1px solid #059669",
+                        color: "#059669",
+                        borderRadius: 6,
+                        padding: "0.25rem 0.6rem",
+                        fontSize: "0.6rem",
+                        textDecoration: "none",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      CRM
+                    </a>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -219,6 +287,26 @@ export default function Hotels() {
           </tbody>
         </table>
       </div>
+
+      {snackbar && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "0.75rem 1.25rem",
+            borderRadius: 8,
+            background: snackbar.ok ? "#059669" : "#dc2626",
+            color: "#fff",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+            zIndex: 9999,
+          }}
+        >
+          {snackbar.msg}
+        </div>
+      )}
     </div>
   );
 }

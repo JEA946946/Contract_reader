@@ -15,6 +15,7 @@ from app.parsers.ai_parser import AiParser
 from app.parsers.restaurant_ai_parser import RestaurantAiParser
 from app.parsers.transportation_ai_parser import TransportationAiParser
 from app.parsers.category_detector import detect_category_from_text, detect_category_from_pdf
+from app.config import settings
 from app.services.normalizer import save_parsed_rows
 from app.utils import detect_file_type
 from app.models import Document
@@ -382,31 +383,29 @@ def parse_document(file_path: Path, document: Document, db: Session) -> list[Par
         document.parsed_rows_json = rows_to_json(transport_rows)
         return []  # Return empty hotel rows
 
-    rows: list[ParsedPriceRow] = []
-    rule_rows: list[ParsedPriceRow] = []
+    # Optimized extraction pipeline: truncation → cache → rule-based → Haiku → Sonnet
+    from app.parsers.optimized_processor import OptimizedDocumentProcessor
 
-    # Try rule-based parser first
-    parser = PARSERS_BY_TYPE.get(file_type)
-    if parser:
-        try:
-            rule_rows = parser.parse(file_path)
-        except Exception as e:
-            document.notes = f"Rule-based parser error: {str(e)}"
+    processor = OptimizedDocumentProcessor(
+        anthropic_api_key=settings.anthropic_api_key,
+        redis_url=settings.redis_url,
+        max_pages=settings.max_pages_per_document,
+        max_chars=settings.max_chars_per_ai_call,
+        enable_sonnet_fallback=True,
+        validation_threshold=settings.validation_threshold,
+        cache_ttl_days=settings.redis_cache_ttl_days,
+    )
 
-    # Quality-based cascade (Phase 1.4 + 2.3)
-    quality = _extraction_quality_score(rule_rows)
-    logger.info("Document %d: rule-based quality score = %.3f (%d rows)",
-                document.id, quality, len(rule_rows))
-
-    if quality >= 0.8:
-        # High quality — trust rule-based results
-        rows = rule_rows
-    elif quality >= 0.3:
-        # Medium quality — hybrid: seed AI with rule-based context
-        rows = _run_ai_with_context(file_path, file_type, rule_rows, document)
-    else:
-        # Low quality or no rows — full AI parse
-        rows = _run_ai_parse(file_path, file_type, document)
+    result = processor.process_document(str(file_path), document.content_hash)
+    rows = result.get("rows", [])
+    method = result.get("extraction_method", "unknown")
+    confidence = result.get("confidence", 0.0)
+    logger.info(
+        "Document %d: optimized pipeline — method=%s, confidence=%.2f, rows=%d",
+        document.id, method, confidence, len(rows),
+    )
+    if method != "rule_based":
+        document.notes = (document.notes or "") + f" | extraction_method={method}, confidence={confidence:.2f}"
 
     if not rows:
         document.notes = (document.notes or "") + " | No price data found"

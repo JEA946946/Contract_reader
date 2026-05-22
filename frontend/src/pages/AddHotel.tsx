@@ -5,7 +5,11 @@ import {
   updateHotelWithPrices,
   getHotel,
   listHotels,
+  pushHotelToCmr,
+  searchPlaces,
+  getPlaceDetails,
 } from "../api/client";
+import type { PlacePrediction } from "../api/client";
 import type { Hotel } from "../types";
 import type {
   PriceRow,
@@ -301,6 +305,10 @@ export default function AddHotel() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const [cmrSupplierId, setCmrSupplierId] = useState<string | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushSnackbar, setPushSnackbar] = useState<{ msg: string; ok: boolean } | null>(null);
+
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
   const [stars, setStars] = useState<number | null>(null);
@@ -309,6 +317,9 @@ export default function AddHotel() {
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [country, setCountry] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [hotelState, setHotelState] = useState("");
 
   const [seasons, setSeasons] = useState<SeasonBlock[]>([]);
 
@@ -324,6 +335,13 @@ export default function AddHotel() {
   const [matchedHotel, setMatchedHotel] = useState<Hotel | null>(null);
   const [allHotels, setAllHotels] = useState<Hotel[]>([]);
   const [dismissedMatch, setDismissedMatch] = useState<number | null>(null);
+
+  // Google Places autocomplete
+  const [placePredictions, setPlacePredictions] = useState<PlacePrediction[]>([]);
+  const [placesLoading, setPlacesLoading] = useState(false);
+  const [showPlaces, setShowPlaces] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const placesRef = useRef<HTMLDivElement>(null);
 
   const MEAL_OPTIONS = ["RO", "BB", "HB", "FB", "AI"];
   const FIT_GIT_OPTIONS = ["FIT", "GIT", "All Year"];
@@ -354,6 +372,61 @@ export default function AddHotel() {
     return () => clearTimeout(timer);
   }, [name, allHotels, isEdit, dismissedMatch]);
 
+  /* ── Google Places autocomplete search ── */
+  useEffect(() => {
+    if (name.trim().length < 2) {
+      setPlacePredictions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setPlacesLoading(true);
+      try {
+        const results = await searchPlaces(name.trim(), "ma");
+        setPlacePredictions(results);
+        setShowPlaces(results.length > 0);
+      } catch {
+        setPlacePredictions([]);
+      } finally {
+        setPlacesLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [name]);
+
+  /* ── close places dropdown on outside click ── */
+  useEffect(() => {
+    if (!showPlaces) return;
+    const handleClick = (e: MouseEvent) => {
+      if (placesRef.current && !placesRef.current.contains(e.target as Node)) {
+        setShowPlaces(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showPlaces]);
+
+  /* ── select a place from Google ── */
+  async function handleSelectPlace(prediction: PlacePrediction) {
+    setShowPlaces(false);
+    setPlacePredictions([]);
+    setLoadingDetails(true);
+    try {
+      const details = await getPlaceDetails(prediction.place_id);
+      setName(details.name || prediction.description);
+      if (details.city) setCity(details.city);
+      if (details.address) setAddress(details.address);
+      if (details.phone) setPhone(details.phone);
+      if (details.country) setCountry(details.country);
+      if (details.postal_code) setPostalCode(details.postal_code);
+      if (details.state) setHotelState(details.state);
+    } catch {
+      // Fall back to just using the description as name
+      setName(prediction.description);
+    } finally {
+      setLoadingDetails(false);
+    }
+  }
+
   /* ── load existing hotel ── */
   useEffect(() => {
     if (!hotelId) return;
@@ -367,6 +440,10 @@ export default function AddHotel() {
         setAddress(h.address ?? "");
         setPhone(h.phone ?? "");
         setEmail(h.email ?? "");
+        setCountry(h.country ?? "");
+        setPostalCode(h.postal_code ?? "");
+        setHotelState(h.state ?? "");
+        setCmrSupplierId(h.cmr_supplier_id ?? null);
 
         // Group flat prices into season blocks
         const fitGitOrder = ["FIT", "GIT", "All Year"];
@@ -697,20 +774,28 @@ export default function AddHotel() {
         }
       }
     }
-    if (occupied.length === 0) return;
 
     occupied.sort((a, b) => a.from.getTime() - b.from.getTime());
 
     // Determine contract year (Nov 1 – Oct 31)
-    const earliest = occupied[0].from;
+    // Use earliest occupied date as reference, or the current season's
+    // first date, or today as fallback
+    let refDate: Date;
+    if (occupied.length > 0) {
+      refDate = occupied[0].from;
+    } else {
+      const ownDr = seasons[sIdx].date_ranges.find((dr) => dr.date_from);
+      refDate = ownDr ? new Date(ownDr.date_from + "T00:00:00") : new Date();
+    }
+
     let contractStart: Date;
     let contractEnd: Date;
-    if (earliest.getMonth() >= 10) {
-      contractStart = new Date(earliest.getFullYear(), 10, 1);
-      contractEnd = new Date(earliest.getFullYear() + 1, 9, 31);
+    if (refDate.getMonth() >= 10) {
+      contractStart = new Date(refDate.getFullYear(), 10, 1);
+      contractEnd = new Date(refDate.getFullYear() + 1, 9, 31);
     } else {
-      contractStart = new Date(earliest.getFullYear() - 1, 10, 1);
-      contractEnd = new Date(earliest.getFullYear(), 9, 31);
+      contractStart = new Date(refDate.getFullYear() - 1, 10, 1);
+      contractEnd = new Date(refDate.getFullYear(), 9, 31);
     }
 
     // Find gaps between occupied ranges within contract year
@@ -856,6 +941,9 @@ export default function AddHotel() {
         address: address || null,
         phone: phone || null,
         email: email || null,
+        country: country || null,
+        postal_code: postalCode || null,
+        state: hotelState || null,
         prices: finalPrices,
       };
       if (isEdit) {
@@ -894,7 +982,63 @@ export default function AddHotel() {
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 1rem" }}>{isEdit ? "Edit Hotel" : "Add Hotel"}</h2>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+        <h2 style={{ margin: 0 }}>{isEdit ? "Edit Hotel" : "Add Hotel"}</h2>
+        {isEdit && (
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              onClick={async () => {
+                setPushing(true);
+                try {
+                  const res = await pushHotelToCmr(Number(hotelId));
+                  setPushSnackbar({ msg: res.message, ok: true });
+                  if (res.cmr_supplier_id) {
+                    setCmrSupplierId(res.cmr_supplier_id);
+                  }
+                } catch (err: unknown) {
+                  const msg = err instanceof Error ? err.message : "Push failed";
+                  setPushSnackbar({ msg, ok: false });
+                } finally {
+                  setPushing(false);
+                  setTimeout(() => setPushSnackbar(null), 4000);
+                }
+              }}
+              disabled={pushing}
+              style={{
+                padding: "0.5rem 1.2rem",
+                background: pushing ? "#999" : cmrSupplierId ? "#059669" : "#2563eb",
+                color: "#fff",
+                border: "none",
+                borderRadius: 6,
+                cursor: pushing ? "not-allowed" : "pointer",
+                fontWeight: 600,
+                fontSize: "0.85rem",
+              }}
+            >
+              {pushing ? "Syncing..." : cmrSupplierId ? "Update CRM" : "Push to CRM"}
+            </button>
+            {cmrSupplierId && (
+              <a
+                href="https://crm.vmmorocco.com/suppliers?category=Accommodation"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: "0.5rem 1.2rem",
+                  background: "none",
+                  border: "1px solid #059669",
+                  color: "#059669",
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: "0.85rem",
+                  textDecoration: "none",
+                }}
+              >
+                View in CRM
+              </a>
+            )}
+          </div>
+        )}
+      </div>
 
       {error && (
         <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#b91c1c", padding: "0.75rem 1rem", borderRadius: 6, marginBottom: "1rem" }}>
@@ -913,9 +1057,59 @@ export default function AddHotel() {
       {activeTab === "info" && (
         <div style={cardStyle}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-            <div>
+            <div ref={placesRef} style={{ position: "relative" }}>
               <label style={lbl}>Hotel Name *</label>
-              <input style={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Hotel Marrakech Palace" />
+              <input
+                style={inp}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onFocus={() => { if (placePredictions.length > 0) setShowPlaces(true); }}
+                placeholder="e.g. Hotel Marrakech Palace"
+              />
+              {loadingDetails && (
+                <span style={{ position: "absolute", right: 8, top: 24, fontSize: "0.7rem", color: "#888" }}>Loading...</span>
+              )}
+              {placesLoading && !loadingDetails && name.trim().length >= 2 && (
+                <span style={{ position: "absolute", right: 8, top: 24, fontSize: "0.7rem", color: "#bbb" }}>Searching...</span>
+              )}
+              {showPlaces && placePredictions.length > 0 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    zIndex: 200,
+                    background: "#fff",
+                    border: "1px solid #ddd",
+                    borderTop: "none",
+                    borderRadius: "0 0 6px 6px",
+                    boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                    maxHeight: 220,
+                    overflowY: "auto",
+                  }}
+                >
+                  {placePredictions.map((p) => (
+                    <div
+                      key={p.place_id}
+                      onClick={() => handleSelectPlace(p)}
+                      style={{
+                        padding: "0.5rem 0.75rem",
+                        cursor: "pointer",
+                        fontSize: "0.82rem",
+                        borderBottom: "1px solid #f0f0f0",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#f0f4ff")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+                    >
+                      {p.description}
+                    </div>
+                  ))}
+                  <div style={{ padding: "0.3rem 0.75rem", fontSize: "0.65rem", color: "#aaa", textAlign: "right" }}>
+                    Powered by Google
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label style={lbl}>City *</label>
@@ -976,6 +1170,18 @@ export default function AddHotel() {
             <div>
               <label style={lbl}>Email</label>
               <input style={inp} value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
+            </div>
+            <div>
+              <label style={lbl}>Country</label>
+              <input style={inp} value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Morocco" />
+            </div>
+            <div>
+              <label style={lbl}>State / Province</label>
+              <input style={inp} value={hotelState} onChange={(e) => setHotelState(e.target.value)} />
+            </div>
+            <div>
+              <label style={lbl}>Postal Code</label>
+              <input style={inp} value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
             </div>
           </div>
 
@@ -1836,6 +2042,26 @@ export default function AddHotel() {
           <span style={{ color: "#059669", fontWeight: 600, fontSize: "0.9rem" }}>Saved!</span>
         )}
       </div>
+
+      {pushSnackbar && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "0.75rem 1.25rem",
+            borderRadius: 8,
+            background: pushSnackbar.ok ? "#059669" : "#dc2626",
+            color: "#fff",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+            zIndex: 9999,
+          }}
+        >
+          {pushSnackbar.msg}
+        </div>
+      )}
     </div>
   );
 }

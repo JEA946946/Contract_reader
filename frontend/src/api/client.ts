@@ -15,6 +15,16 @@ import type {
   MenuPriceListResponse,
   TransportPriceListResponse,
   Folder,
+  ProcessedEmail,
+  ProcessedEmailListResponse,
+  EmailFolderRule,
+  EmailLabel,
+  ManagedCity,
+  ManagedCategory,
+  RestaurantDetail,
+  CreateRestaurantResponse,
+  TransportDetail,
+  CreateTransportResponse,
 } from "../types";
 
 const api = axios.create({
@@ -79,6 +89,13 @@ export async function getDocuments(category?: string): Promise<Document[]> {
 
 export async function deleteDocument(id: number): Promise<void> {
   await api.delete(`/documents/${id}`);
+}
+
+export async function batchReparseDocuments(
+  filter: "failed" | "zero_rows"
+): Promise<{ queued: number; skipped: number; message: string }> {
+  const { data } = await api.post("/documents/batch-reparse", { filter });
+  return data;
 }
 
 export async function updateDocumentEntity(
@@ -148,6 +165,9 @@ type HotelPricePayload = {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  country?: string | null;
+  postal_code?: string | null;
+  state?: string | null;
   prices: {
     room_desc?: string | null;
     meal_plan?: string | null;
@@ -192,6 +212,21 @@ export async function triggerPollNow(): Promise<{ message: string }> {
 
 export function getDocumentFileUrl(documentId: number): string {
   return `${api.defaults.baseURL}/documents/${documentId}/file`;
+}
+
+export interface DocumentAttachment {
+  index: number;
+  filename: string;
+  content_type: string;
+}
+
+export async function getDocumentAttachments(documentId: number): Promise<DocumentAttachment[]> {
+  const { data } = await api.get(`/documents/${documentId}/attachments`);
+  return data;
+}
+
+export function getDocumentAttachmentUrl(documentId: number, attIndex: number): string {
+  return `${api.defaults.baseURL}/documents/${documentId}/attachments/${attIndex}`;
 }
 
 export function getExportUrl(
@@ -245,6 +280,69 @@ export async function deleteRestaurant(restaurantId: number): Promise<void> {
   await api.delete(`/restaurants/${restaurantId}`);
 }
 
+export async function getRestaurantDetail(id: number): Promise<RestaurantDetail> {
+  const { data } = await api.get<RestaurantDetail>(`/restaurants/${id}`);
+  return data;
+}
+
+export async function createRestaurant(payload: {
+  name: string;
+  city: string;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  menu_prices: {
+    menu_name?: string | null;
+    description?: string | null;
+    lunch_price?: number | null;
+    dinner_price?: number | null;
+    lunch_child_price?: number | null;
+    dinner_child_price?: number | null;
+    course_1?: string | null;
+    course_2?: string | null;
+    course_3?: string | null;
+    course_4?: string | null;
+    course_5?: string | null;
+    min_pax?: number | null;
+    drink_included?: string | null;
+    season_code?: string | null;
+    date_ranges?: { date_from: string | null; date_to: string | null }[];
+    note?: string | null;
+  }[];
+}): Promise<CreateRestaurantResponse> {
+  const { data } = await api.post<CreateRestaurantResponse>("/restaurants", payload);
+  return data;
+}
+
+export async function updateRestaurant(id: number, payload: {
+  name: string;
+  city: string;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  menu_prices: {
+    menu_name?: string | null;
+    description?: string | null;
+    lunch_price?: number | null;
+    dinner_price?: number | null;
+    lunch_child_price?: number | null;
+    dinner_child_price?: number | null;
+    course_1?: string | null;
+    course_2?: string | null;
+    course_3?: string | null;
+    course_4?: string | null;
+    course_5?: string | null;
+    min_pax?: number | null;
+    drink_included?: string | null;
+    season_code?: string | null;
+    date_ranges?: { date_from: string | null; date_to: string | null }[];
+    note?: string | null;
+  }[];
+}): Promise<CreateRestaurantResponse> {
+  const { data } = await api.put<CreateRestaurantResponse>(`/restaurants/${id}`, payload);
+  return data;
+}
+
 // --- Transportation API ---
 
 export async function confirmTransportDocument(
@@ -290,6 +388,55 @@ export async function deleteTransportCompany(id: number): Promise<void> {
   await api.delete(`/transportation/${id}`);
 }
 
+export async function getTransportDetail(id: number): Promise<TransportDetail> {
+  const { data } = await api.get<TransportDetail>(`/transportation/${id}`);
+  return data;
+}
+
+export async function createTransportCompany(payload: {
+  name: string;
+  code: string;
+  city: string;
+  phone?: string | null;
+  email?: string | null;
+  transport_prices: {
+    code?: string | null;
+    price?: number | null;
+    product?: string | null;
+    bus_size?: number | null;
+    service_type?: string | null;
+    days?: number | null;
+    route_description?: string | null;
+    note?: string | null;
+    city?: string | null;
+  }[];
+}): Promise<CreateTransportResponse> {
+  const { data } = await api.post<CreateTransportResponse>("/transportation", payload);
+  return data;
+}
+
+export async function updateTransportCompany(id: number, payload: {
+  name: string;
+  code: string;
+  city: string;
+  phone?: string | null;
+  email?: string | null;
+  transport_prices: {
+    code?: string | null;
+    price?: number | null;
+    product?: string | null;
+    bus_size?: number | null;
+    service_type?: string | null;
+    days?: number | null;
+    route_description?: string | null;
+    note?: string | null;
+    city?: string | null;
+  }[];
+}): Promise<CreateTransportResponse> {
+  const { data } = await api.put<CreateTransportResponse>(`/transportation/${id}`, payload);
+  return data;
+}
+
 // --- Folder API ---
 
 export async function getFolderTree(): Promise<Folder[]> {
@@ -333,4 +480,165 @@ export async function moveDocumentToFolder(documentId: number, folderId: number 
 
 export async function batchMoveDocuments(documentIds: number[], folderId: number | null): Promise<void> {
   await api.patch("/folders/documents/batch-move", { document_ids: documentIds, folder_id: folderId });
+}
+
+// --- Email Inbox API ---
+
+export async function getEmails(params: {
+  page?: number;
+  page_size?: number;
+  search?: string;
+  status?: string;
+  label?: string;
+  folder_id?: number;
+  unfiled?: boolean;
+}): Promise<ProcessedEmailListResponse> {
+  const { data } = await api.get<ProcessedEmailListResponse>("/email-polling/emails", { params });
+  return data;
+}
+
+export async function getEmailDetail(id: number): Promise<ProcessedEmail> {
+  const { data } = await api.get<ProcessedEmail>(`/email-polling/emails/${id}`);
+  return data;
+}
+
+export async function assignEmailFolder(emailId: number, folderId: number | null): Promise<void> {
+  await api.patch(`/email-polling/emails/${emailId}/assign-folder`, { folder_id: folderId });
+}
+
+export async function setEmailLabel(emailId: number, label: EmailLabel | null): Promise<void> {
+  await api.patch(`/email-polling/emails/${emailId}/label`, { label });
+}
+
+export async function requeueEmail(emailId: number): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>(`/email-polling/emails/${emailId}/requeue`);
+  return data;
+}
+
+export async function getEmailByDocument(documentId: number): Promise<{ email_id: number }> {
+  const { data } = await api.get<{ email_id: number }>(`/email-polling/emails/by-document/${documentId}`);
+  return data;
+}
+
+// --- Email Folder Rules API ---
+
+export async function getEmailRules(): Promise<EmailFolderRule[]> {
+  const { data } = await api.get<EmailFolderRule[]>("/email-rules");
+  return data;
+}
+
+export async function createEmailRule(rule: {
+  keyword: string;
+  folder_id: number;
+  is_case_sensitive?: boolean;
+  priority?: number;
+}): Promise<EmailFolderRule> {
+  const { data } = await api.post<EmailFolderRule>("/email-rules", rule);
+  return data;
+}
+
+export async function updateEmailRule(
+  id: number,
+  updates: Partial<{ keyword: string; folder_id: number; is_case_sensitive: boolean; priority: number }>
+): Promise<EmailFolderRule> {
+  const { data } = await api.put<EmailFolderRule>(`/email-rules/${id}`, updates);
+  return data;
+}
+
+export async function deleteEmailRule(id: number): Promise<void> {
+  await api.delete(`/email-rules/${id}`);
+}
+
+// --- Managed Cities API ---
+
+export async function getManagedCities(): Promise<ManagedCity[]> {
+  const { data } = await api.get<ManagedCity[]>("/managed/cities");
+  return data;
+}
+
+export async function createManagedCity(name: string): Promise<ManagedCity> {
+  const { data } = await api.post<ManagedCity>("/managed/cities", { name });
+  return data;
+}
+
+export async function updateManagedCity(id: number, name: string): Promise<ManagedCity> {
+  const { data } = await api.put<ManagedCity>(`/managed/cities/${id}`, { name });
+  return data;
+}
+
+export async function deleteManagedCity(id: number): Promise<void> {
+  await api.delete(`/managed/cities/${id}`);
+}
+
+// --- Push to CMR API ---
+
+export async function pushHotelToCmr(hotelId: number): Promise<{ success: boolean; message: string; action: string; cmr_supplier_id: string; rates_count: number }> {
+  const { data } = await api.post(`/suppliers/hotels/${hotelId}/push-to-cmr`);
+  return data;
+}
+
+export async function pushRestaurantToCmr(restaurantId: number): Promise<{ success: boolean; message: string; action: string; cmr_supplier_id: string; menus_count: number }> {
+  const { data } = await api.post(`/suppliers/restaurants/${restaurantId}/push-to-cmr`);
+  return data;
+}
+
+export async function pushTransportToCmr(companyId: number): Promise<{ success: boolean; message: string; action: string; cmr_supplier_id: string; routes_count: number }> {
+  const { data } = await api.post(`/suppliers/transport-companies/${companyId}/push-to-cmr`);
+  return data;
+}
+
+// --- Managed Categories API ---
+
+export async function getManagedCategories(): Promise<ManagedCategory[]> {
+  const { data } = await api.get<ManagedCategory[]>("/managed/categories");
+  return data;
+}
+
+export async function createManagedCategory(cat: { slug: string; label: string }): Promise<ManagedCategory> {
+  const { data } = await api.post<ManagedCategory>("/managed/categories", cat);
+  return data;
+}
+
+export async function updateManagedCategory(
+  id: number,
+  updates: Partial<{ slug: string; label: string }>
+): Promise<ManagedCategory> {
+  const { data } = await api.put<ManagedCategory>(`/managed/categories/${id}`, updates);
+  return data;
+}
+
+export async function deleteManagedCategory(id: number): Promise<void> {
+  await api.delete(`/managed/categories/${id}`);
+}
+
+// --- Google Places API ---
+
+export interface PlacePrediction {
+  place_id: string;
+  description: string;
+}
+
+export interface PlaceDetails {
+  name: string;
+  address: string;
+  phone: string;
+  website: string;
+  city: string;
+  country: string;
+  postal_code: string;
+  state: string;
+}
+
+export async function searchPlaces(query: string, region: string = "ma"): Promise<PlacePrediction[]> {
+  const { data } = await api.get<{ predictions: PlacePrediction[] }>("/places/autocomplete", {
+    params: { q: query, region },
+  });
+  return data.predictions;
+}
+
+export async function getPlaceDetails(placeId: string): Promise<PlaceDetails> {
+  const { data } = await api.get<PlaceDetails>("/places/details", {
+    params: { place_id: placeId },
+  });
+  return data;
 }

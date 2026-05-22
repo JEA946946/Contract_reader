@@ -21,6 +21,9 @@ class HotelOut(BaseModel):
     address: Optional[str]
     phone: Optional[str]
     email: Optional[str]
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    state: Optional[str] = None
     source_document_id: Optional[int] = None
     cmr_supplier_id: Optional[str] = None
 
@@ -213,6 +216,9 @@ class CreateHotelWithPricesRequest(BaseModel):
     address: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    state: Optional[str] = None
     cmr_supplier_id: Optional[str] = None
     prices: List[ManualPriceRowSchema] = []
 
@@ -254,6 +260,9 @@ class HotelDetailOut(BaseModel):
     address: Optional[str]
     phone: Optional[str]
     email: Optional[str]
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    state: Optional[str] = None
     cmr_supplier_id: Optional[str] = None
     prices: List[PriceWithoutHotelOut]
 
@@ -353,6 +362,138 @@ class TransportPriceListResponse(BaseModel):
     page_size: int
 
 
+# --- Manual Restaurant schemas ---
+
+class ManualMenuRowSchema(BaseModel):
+    menu_name: Optional[str] = None
+    description: Optional[str] = None
+    lunch_price: Optional[float] = None
+    dinner_price: Optional[float] = None
+    lunch_child_price: Optional[float] = None
+    dinner_child_price: Optional[float] = None
+    course_1: Optional[str] = None
+    course_2: Optional[str] = None
+    course_3: Optional[str] = None
+    course_4: Optional[str] = None
+    course_5: Optional[str] = None
+    min_pax: Optional[int] = None
+    drink_included: Optional[str] = None
+    season_code: Optional[str] = None
+    date_ranges: List[ParsedDateRangeSchema] = []
+    note: Optional[str] = None
+
+
+class CreateRestaurantRequest(BaseModel):
+    name: str
+    city: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    menu_prices: List[ManualMenuRowSchema] = []
+
+
+class CreateRestaurantResponse(BaseModel):
+    restaurant_id: int
+    restaurant_name: str
+    price_count: int
+    message: str
+
+
+class MenuPriceWithoutRestaurantOut(BaseModel):
+    id: int
+    document_id: Optional[int]
+    menu_name: Optional[str]
+    description: Optional[str]
+    lunch_price: Optional[Decimal]
+    dinner_price: Optional[Decimal]
+    lunch_child_price: Optional[Decimal]
+    dinner_child_price: Optional[Decimal]
+    course_1: Optional[str]
+    course_2: Optional[str]
+    course_3: Optional[str]
+    course_4: Optional[str]
+    course_5: Optional[str]
+    min_pax: Optional[int]
+    drink_included: Optional[str]
+    season_code: Optional[str]
+    note: Optional[str]
+    season_dates: List[MenuSeasonDateOut]
+
+    model_config = {"from_attributes": True}
+
+
+class RestaurantDetailOut(BaseModel):
+    id: int
+    name: str
+    city: str
+    address: Optional[str]
+    phone: Optional[str]
+    email: Optional[str]
+    cmr_supplier_id: Optional[str] = None
+    menu_prices: List[MenuPriceWithoutRestaurantOut]
+
+    model_config = {"from_attributes": True}
+
+
+# --- Manual Transportation schemas ---
+
+class ManualTransportRowSchema(BaseModel):
+    code: Optional[str] = None
+    price: Optional[float] = None
+    product: Optional[str] = None
+    bus_size: Optional[int] = None
+    service_type: Optional[str] = None
+    days: Optional[int] = None
+    route_description: Optional[str] = None
+    note: Optional[str] = None
+    city: Optional[str] = None
+
+
+class CreateTransportRequest(BaseModel):
+    name: str
+    code: str
+    city: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    transport_prices: List[ManualTransportRowSchema] = []
+
+
+class CreateTransportResponse(BaseModel):
+    company_id: int
+    company_name: str
+    price_count: int
+    message: str
+
+
+class TransportPriceWithoutCompanyOut(BaseModel):
+    id: int
+    document_id: Optional[int]
+    code: Optional[str]
+    price: Optional[Decimal]
+    product: Optional[str]
+    bus_size: Optional[int]
+    service_type: Optional[str]
+    days: Optional[int]
+    route_description: Optional[str]
+    note: Optional[str]
+    city: Optional[str]
+
+    model_config = {"from_attributes": True}
+
+
+class TransportDetailOut(BaseModel):
+    id: int
+    name: str
+    code: str
+    city: str
+    phone: Optional[str]
+    email: Optional[str]
+    cmr_supplier_id: Optional[str] = None
+    transport_prices: List[TransportPriceWithoutCompanyOut]
+
+    model_config = {"from_attributes": True}
+
+
 # --- Folder schemas ---
 
 class FolderCreate(BaseModel):
@@ -387,3 +528,105 @@ class DocumentMoveToFolder(BaseModel):
 class BatchMoveDocuments(BaseModel):
     document_ids: List[int]
     folder_id: Optional[int] = None
+
+
+# --- Email Inbox schemas ---
+
+class ProcessedEmailDetailOut(BaseModel):
+    id: int
+    message_id: str
+    subject: Optional[str]
+    sender: Optional[str]
+    received_date: Optional[datetime]
+    document_id: Optional[int]
+    processed_at: datetime
+    status: str
+    notes: Optional[str]
+    body_text: Optional[str] = None
+    body_html: Optional[str] = None
+    attachment_names: Optional[str] = None
+    folder_id: Optional[int] = None
+    folder_name: Optional[str] = None
+    label: Optional[str] = None
+    document_row_count: Optional[int] = None
+    document_status: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProcessedEmailListOut(BaseModel):
+    items: List[ProcessedEmailDetailOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AssignFolderRequest(BaseModel):
+    folder_id: Optional[int] = None
+
+
+class SetLabelRequest(BaseModel):
+    label: Optional[str] = None
+
+
+# --- Email Folder Rule schemas ---
+
+class EmailFolderRuleCreate(BaseModel):
+    keyword: str
+    folder_id: int
+    is_case_sensitive: bool = False
+    priority: int = 0
+
+
+class EmailFolderRuleUpdate(BaseModel):
+    keyword: Optional[str] = None
+    folder_id: Optional[int] = None
+    is_case_sensitive: Optional[bool] = None
+    priority: Optional[int] = None
+
+
+class EmailFolderRuleOut(BaseModel):
+    id: int
+    keyword: str
+    folder_id: int
+    is_case_sensitive: bool
+    priority: int
+    created_at: datetime
+    folder_name: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+# --- Managed City schemas ---
+
+class ManagedCityCreate(BaseModel):
+    name: str
+
+
+class ManagedCityOut(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# --- Managed Category schemas ---
+
+class ManagedCategoryCreate(BaseModel):
+    slug: str
+    label: str
+
+
+class ManagedCategoryUpdate(BaseModel):
+    slug: Optional[str] = None
+    label: Optional[str] = None
+
+
+class ManagedCategoryOut(BaseModel):
+    id: int
+    slug: str
+    label: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

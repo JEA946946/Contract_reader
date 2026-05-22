@@ -17,10 +17,22 @@ class Settings(BaseSettings):
     cmr_api_base: str = ""
     cmr_api_token: str = ""
 
+    google_places_api_key: str = ""
+
     allowed_origins: str = "http://localhost:5173,http://localhost:3000,http://localhost:5174,http://localhost:8005"
 
     # AI parser settings
     ai_validation_pass_enabled: bool = False  # Set True to re-enable separate Pass 3
+
+    # Pipeline optimization
+    validation_threshold: float = 0.6       # Haiku confidence below this triggers Sonnet fallback
+    max_pages_per_document: int = 15        # Max pages to send to AI (truncation)
+    max_chars_per_ai_call: int = 30000      # Max text chars per AI call
+    ai_timeout: int = 30                    # Timeout in seconds for AI calls
+
+    # Redis cache
+    redis_url: str = "redis://localhost:6379"
+    redis_cache_ttl_days: int = 30
 
     @property
     def upload_path(self) -> Path:

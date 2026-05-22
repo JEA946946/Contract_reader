@@ -35,6 +35,11 @@ class AppSettings(BaseModel):
     # CMR integration
     cmr_configured: bool
     cmr_api_base: str
+    cmr_api_token_display: str  # masked
+
+    # Google Places
+    google_places_configured: bool
+    google_places_key_display: str  # masked
 
     # AI parser
     ai_validation_pass_enabled: bool
@@ -47,6 +52,32 @@ class AppSettings(BaseModel):
     documents_with_hash: int
     total_feedback_entries: int
     avg_confidence_score: Optional[float]
+
+
+class AnthropicSettingsUpdate(BaseModel):
+    anthropic_api_key: str = ""  # empty = keep existing
+
+
+class AnthropicSettingsResponse(BaseModel):
+    anthropic_api_key_display: str
+
+
+class CmrSettingsUpdate(BaseModel):
+    cmr_api_base: str = ""
+    cmr_api_token: str = ""  # empty = keep existing
+
+
+class CmrSettingsResponse(BaseModel):
+    cmr_api_base: str
+    cmr_api_token_display: str
+
+
+class GooglePlacesSettingsUpdate(BaseModel):
+    google_places_api_key: str = ""  # empty = keep existing
+
+
+class GooglePlacesSettingsResponse(BaseModel):
+    google_places_api_key_display: str
 
 
 class GmailSettingsUpdate(BaseModel):
@@ -147,6 +178,9 @@ def get_settings(db: Session = Depends(get_db)):
         gmail_poll_interval_minutes=settings.gmail_poll_interval_minutes,
         cmr_configured=bool(settings.cmr_api_base),
         cmr_api_base=settings.cmr_api_base or "",
+        cmr_api_token_display=_mask_key(settings.cmr_api_token),
+        google_places_configured=bool(settings.google_places_api_key),
+        google_places_key_display=_mask_key(settings.google_places_api_key),
         ai_validation_pass_enabled=settings.ai_validation_pass_enabled,
         upload_dir=settings.upload_dir,
         total_documents=total_docs,
@@ -206,6 +240,74 @@ def update_gmail_settings(body: GmailSettingsUpdate):
         gmail_imap_port=settings.gmail_imap_port,
         gmail_poll_interval_minutes=settings.gmail_poll_interval_minutes,
         gmail_poll_enabled=settings.gmail_poll_enabled,
+    )
+
+
+@router.get("/anthropic", response_model=AnthropicSettingsResponse)
+def get_anthropic_settings():
+    return AnthropicSettingsResponse(
+        anthropic_api_key_display=_mask_key(settings.anthropic_api_key),
+    )
+
+
+@router.put("/anthropic", response_model=AnthropicSettingsResponse)
+def update_anthropic_settings(body: AnthropicSettingsUpdate):
+    actual_key = body.anthropic_api_key if body.anthropic_api_key else settings.anthropic_api_key
+    settings.anthropic_api_key = actual_key
+    env_updates: dict[str, str] = {}
+    if body.anthropic_api_key:
+        env_updates["ANTHROPIC_API_KEY"] = body.anthropic_api_key
+    if env_updates:
+        _update_env_file(env_updates)
+    logger.info("Anthropic settings updated")
+    return AnthropicSettingsResponse(
+        anthropic_api_key_display=_mask_key(settings.anthropic_api_key),
+    )
+
+
+@router.get("/cmr", response_model=CmrSettingsResponse)
+def get_cmr_settings():
+    return CmrSettingsResponse(
+        cmr_api_base=settings.cmr_api_base or "",
+        cmr_api_token_display=_mask_key(settings.cmr_api_token),
+    )
+
+
+@router.put("/cmr", response_model=CmrSettingsResponse)
+def update_cmr_settings(body: CmrSettingsUpdate):
+    actual_token = body.cmr_api_token if body.cmr_api_token else settings.cmr_api_token
+    settings.cmr_api_base = body.cmr_api_base
+    settings.cmr_api_token = actual_token
+    env_updates: dict[str, str] = {"CMR_API_BASE": body.cmr_api_base}
+    if body.cmr_api_token:
+        env_updates["CMR_API_TOKEN"] = body.cmr_api_token
+    _update_env_file(env_updates)
+    logger.info("CMR settings updated (base=%s)", body.cmr_api_base)
+    return CmrSettingsResponse(
+        cmr_api_base=settings.cmr_api_base or "",
+        cmr_api_token_display=_mask_key(settings.cmr_api_token),
+    )
+
+
+@router.get("/google-places", response_model=GooglePlacesSettingsResponse)
+def get_google_places_settings():
+    return GooglePlacesSettingsResponse(
+        google_places_api_key_display=_mask_key(settings.google_places_api_key),
+    )
+
+
+@router.put("/google-places", response_model=GooglePlacesSettingsResponse)
+def update_google_places_settings(body: GooglePlacesSettingsUpdate):
+    actual_key = body.google_places_api_key if body.google_places_api_key else settings.google_places_api_key
+    settings.google_places_api_key = actual_key
+    env_updates: dict[str, str] = {}
+    if body.google_places_api_key:
+        env_updates["GOOGLE_PLACES_API_KEY"] = body.google_places_api_key
+    if env_updates:
+        _update_env_file(env_updates)
+    logger.info("Google Places settings updated")
+    return GooglePlacesSettingsResponse(
+        google_places_api_key_display=_mask_key(settings.google_places_api_key),
     )
 
 

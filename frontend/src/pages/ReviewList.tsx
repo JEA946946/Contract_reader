@@ -4,6 +4,7 @@ import {
   getDocuments,
   deleteDocument,
   aiReparseDocument,
+  batchReparseDocuments,
   getEmailPollingStatus,
   triggerPollNow,
   uploadDocument,
@@ -12,13 +13,14 @@ import type { Document, EmailPollingStatus } from "../types";
 import FolderSidebar, { type SelectedFolder } from "../components/FolderSidebar";
 
 type ActiveTab = "hotel" | "restaurant" | "transportation";
-type StatusGroup = "processing" | "pending_review" | "completed" | "failed";
+type StatusGroup = "processing" | "pending_review" | "completed" | "failed" | "needs_reparse";
 
 const COLUMNS: { key: StatusGroup; label: string; color: string; bg: string }[] = [
   { key: "processing", label: "Processing", color: "#e65100", bg: "#fff8f0" },
   { key: "pending_review", label: "Ready to Review", color: "#1565c0", bg: "#f0f7ff" },
   { key: "completed", label: "Confirmed", color: "#2e7d32", bg: "#f2fdf4" },
   { key: "failed", label: "Failed", color: "#c62828", bg: "#fff5f5" },
+  { key: "needs_reparse", label: "Needs Re-parse", color: "#6a1b9a", bg: "#f3e5f5" },
 ];
 
 function groupByStatus(docs: Document[]) {
@@ -27,10 +29,17 @@ function groupByStatus(docs: Document[]) {
     pending_review: [],
     completed: [],
     failed: [],
+    needs_reparse: [],
   };
   for (const d of docs) {
-    const key = d.status as StatusGroup;
-    if (key in groups) groups[key].push(d);
+    // Documents with 0 rows that aren't still processing go to "needs_reparse"
+    const zeroRows = (d.row_count === null || d.row_count === 0) && d.status !== "processing";
+    if (zeroRows) {
+      groups.needs_reparse.push(d);
+    } else {
+      const key = d.status as StatusGroup;
+      if (key in groups && key !== "needs_reparse") groups[key].push(d);
+    }
   }
   return groups;
 }
@@ -44,6 +53,7 @@ export default function ReviewList() {
   const [reparsing, setReparsing] = useState<Set<number>>(new Set());
   const [pollTriggering, setPollTriggering] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [batchReparsing, setBatchReparsing] = useState(false);
   const [folderFilter, setFolderFilter] = useState<SelectedFolder>({ type: "all" });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,7 +99,8 @@ export default function ReviewList() {
   const filteredDocs = (() => {
     if (folderFilter.type === "all") return docs;
     if (folderFilter.type === "unfiled") return docs.filter((d) => d.folder_id === null);
-    return docs.filter((d) => d.folder_id === folderFilter.id);
+    if (folderFilter.type === "folder") return docs.filter((d) => d.folder_id === folderFilter.id);
+    return docs;
   })();
 
   const unfiledCount = docs.filter((d) => d.folder_id === null).length;
@@ -189,6 +200,19 @@ export default function ReviewList() {
     e.target.value = "";
   };
 
+  const handleBatchReparse = async () => {
+    if (!confirm("Re-parse all documents with 0 rows? This will queue them for AI extraction.")) return;
+    setBatchReparsing(true);
+    try {
+      const res = await batchReparseDocuments("zero_rows");
+      alert(res.message);
+      fetchData();
+    } catch {
+      alert("Batch re-parse failed.");
+    }
+    setBatchReparsing(false);
+  };
+
   // --- Render ---
   if (loading) {
     return (
@@ -201,7 +225,7 @@ export default function ReviewList() {
   const completedToShow = groups.completed.slice(0, 20);
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 80px)", gap: "0.75rem" }}>
+    <div style={{ display: "flex", height: "calc(100vh - 3rem)", gap: "0.75rem" }}>
       <FolderSidebar
         selected={folderFilter}
         onSelect={setFolderFilter}
@@ -296,10 +320,11 @@ export default function ReviewList() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
+          gridTemplateColumns: "repeat(5, minmax(200px, 1fr))",
           gap: "0.75rem",
           flex: 1,
           minHeight: 0,
+          overflowX: "auto",
         }}
       >
         {COLUMNS.map((col) => {
@@ -346,6 +371,25 @@ export default function ReviewList() {
                 >
                   {totalCount}
                 </span>
+                {col.key === "needs_reparse" && totalCount > 0 && (
+                  <button
+                    onClick={handleBatchReparse}
+                    disabled={batchReparsing}
+                    style={{
+                      marginLeft: "auto",
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      border: "1px solid #ce93d8",
+                      background: batchReparsing ? "#eee" : "#f3e5f5",
+                      color: "#6a1b9a",
+                      cursor: batchReparsing ? "default" : "pointer",
+                      fontSize: "0.68rem",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {batchReparsing ? "Queuing..." : "Re-parse All"}
+                  </button>
+                )}
               </div>
 
               {/* Card List */}
@@ -397,14 +441,19 @@ export default function ReviewList() {
 
       {/* Responsive stacking */}
       <style>{`
-        @media (max-width: 900px) {
-          div[style*="grid-template-columns: repeat(4"] {
-            grid-template-columns: repeat(2, 1fr) !important;
+        @media (max-width: 1100px) {
+          div[style*="grid-template-columns: repeat(5"] {
+            grid-template-columns: repeat(3, minmax(200px, 1fr)) !important;
+          }
+        }
+        @media (max-width: 750px) {
+          div[style*="grid-template-columns: repeat(5"] {
+            grid-template-columns: repeat(2, minmax(200px, 1fr)) !important;
           }
         }
         @media (max-width: 560px) {
-          div[style*="grid-template-columns: repeat(4"] {
-            grid-template-columns: 1fr !important;
+          div[style*="grid-template-columns: repeat(5"] {
+            grid-template-columns: minmax(200px, 1fr) !important;
           }
         }
       `}</style>
@@ -575,7 +624,7 @@ function KanbanCard({
               ✏️ {column === "completed" ? "Edit" : "Review"}
             </button>
           )}
-          {column === "pending_review" && !hasRows && (
+          {(column === "pending_review" || column === "needs_reparse") && !hasRows && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -584,9 +633,9 @@ function KanbanCard({
               style={{
                 padding: "2px 8px",
                 borderRadius: 4,
-                border: "1px solid #bbdefb",
-                background: "#e3f2fd",
-                color: "#1565c0",
+                border: column === "needs_reparse" ? "1px solid #ce93d8" : "1px solid #bbdefb",
+                background: column === "needs_reparse" ? "#f3e5f5" : "#e3f2fd",
+                color: column === "needs_reparse" ? "#6a1b9a" : "#1565c0",
                 cursor: "pointer",
                 fontSize: "0.7rem",
                 fontWeight: 600,
@@ -615,7 +664,7 @@ function KanbanCard({
               Retry
             </button>
           )}
-          {(column === "failed" || column === "completed" || column === "processing" || column === "pending_review") && (
+          {(column === "failed" || column === "completed" || column === "processing" || column === "pending_review" || column === "needs_reparse") && (
             <button
               onClick={(e) => {
                 e.stopPropagation();

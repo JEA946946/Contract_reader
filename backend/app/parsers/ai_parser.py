@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 from pathlib import Path
@@ -404,107 +403,30 @@ class AiParser(BaseParser):
         return self.parse_text(text)
 
     def parse_pdf(self, pdf_path: Path) -> list[ParsedPriceRow]:
-        """Parse a PDF by sending the actual document to Claude (vision).
+        """Parse a PDF by extracting text and sending to Claude via Agent SDK.
 
-        This gives Claude the full visual layout context — tables, merged cells,
-        headers, formatting — for much more accurate extraction than text-only.
+        Extracts text with pdfplumber (tables + paragraphs) and processes
+        through the multi-pass AI extraction pipeline.
         """
-        if not settings.anthropic_api_key or settings.anthropic_api_key == "your-api-key-here":
-            raise RuntimeError("Anthropic API key not configured")
-
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-
-        pdf_bytes = pdf_path.read_bytes()
-        pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
-
-        pdf_block = {
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": "application/pdf",
-                "data": pdf_b64,
-            },
-        }
-
-        # ── PASS 1: Analysis (with PDF vision) — uses Haiku (cheaper) ──
-        logger.info("AI Parser (vision) — Pass 1: Analysing document structure (Haiku)")
-        analysis = self._call_claude_with_content(
-            client,
-            system=ANALYSIS_PROMPT,
-            content=[pdf_block, {"type": "text", "text": "Analyse this hotel contract document."}],
-            max_tokens=3000,
-            model=self.ANALYSIS_MODEL,
-        )
-        logger.info("AI Parser (vision) — Pass 1 complete (%d chars)", len(analysis))
-
-        # ── PASS 2: Extraction + inline validation (with PDF vision) ──
-        logger.info("AI Parser (vision) — Pass 2: Extracting rates (with inline validation)")
-        extraction_system = EXTRACTION_PROMPT_TEMPLATE.format(
-            analysis=analysis,
-            few_shot=FEW_SHOT_EXAMPLES,
-        )
-        extraction_raw = self._call_claude_with_content(
-            client,
-            system=extraction_system,
-            content=[pdf_block, {"type": "text", "text": "Extract all rate data from this document."}],
-            max_tokens=16000,
-        )
-        data = self._parse_json(extraction_raw)
-        logger.info("AI Parser (vision) — Pass 2 complete: %d rows extracted", len(data))
-
-        if not data:
+        source_text = self._extract_pdf_text(pdf_path)
+        if not source_text:
+            logger.warning("AI Parser — no text extracted from PDF %s", pdf_path.name)
             return []
 
-        # ── Optional Pass 3: Separate validation (disabled by default) ──
-        if settings.ai_validation_pass_enabled:
-            logger.info("AI Parser (vision) — Pass 3: Validating extracted data (separate pass)")
-            validation_input = json.dumps(data, ensure_ascii=False, indent=2)
-            validation_raw = self._call_claude(
-                client,
-                system=VALIDATION_PROMPT,
-                user_content=f"Validate and fix these extracted rows:\n{validation_input}",
-                max_tokens=16000,
-            )
-            validated = self._parse_json(validation_raw)
-            if validated:
-                data = validated
-                logger.info("AI Parser (vision) — Pass 3 complete: %d rows after validation", len(data))
-            else:
-                logger.warning("AI Parser (vision) — Pass 3 returned invalid JSON, keeping pass 2 results")
-
-        rows = self._convert_rows(data)
-
-        # ── Grounding verification ──
-        # Extract text from PDF for grounding check
-        source_text = self._extract_pdf_text(pdf_path)
-        if source_text:
-            logger.info("AI Parser (vision) — Grounding: check against source text")
-            rows = self._ground_and_verify(client, source_text, rows)
-
-        return rows
+        return self.parse_text(source_text)
 
     def parse_text(self, text: str) -> list[ParsedPriceRow]:
-        if not settings.anthropic_api_key or settings.anthropic_api_key == "your-api-key-here":
-            raise RuntimeError("Anthropic API key not configured")
-
-        import anthropic
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        from app.services.claude_sdk import call_claude_sdk
 
         # Truncate very long texts
         if len(text) > 80000:
             text = text[:80000] + "\n... (truncated)"
 
-        # ── PASS 1: Analysis — uses Haiku (cheaper) ──
-        logger.info("AI Parser — Pass 1: Analysing document structure (Haiku)")
-        analysis = self._call_claude(
-            client,
-            system=ANALYSIS_PROMPT,
-            user_content=text,
-            max_tokens=3000,
-            model=self.ANALYSIS_MODEL,
+        # ── PASS 1: Analysis ──
+        logger.info("AI Parser — Pass 1: Analysing document structure")
+        analysis = call_claude_sdk(
+            prompt=text,
+            system_prompt=ANALYSIS_PROMPT,
         )
         logger.info("AI Parser — Pass 1 complete (%d chars)", len(analysis))
 
@@ -514,11 +436,9 @@ class AiParser(BaseParser):
             analysis=analysis,
             few_shot=FEW_SHOT_EXAMPLES,
         )
-        extraction_raw = self._call_claude(
-            client,
-            system=extraction_system,
-            user_content=text,
-            max_tokens=16000,
+        extraction_raw = call_claude_sdk(
+            prompt=text,
+            system_prompt=extraction_system,
         )
         data = self._parse_json(extraction_raw)
         logger.info("AI Parser — Pass 2 complete: %d rows extracted", len(data))
@@ -530,11 +450,9 @@ class AiParser(BaseParser):
         if settings.ai_validation_pass_enabled:
             logger.info("AI Parser — Pass 3: Validating extracted data (separate pass)")
             validation_input = json.dumps(data, ensure_ascii=False, indent=2)
-            validation_raw = self._call_claude(
-                client,
-                system=VALIDATION_PROMPT,
-                user_content=f"Validate and fix these extracted rows:\n{validation_input}",
-                max_tokens=16000,
+            validation_raw = call_claude_sdk(
+                prompt=f"Validate and fix these extracted rows:\n{validation_input}",
+                system_prompt=VALIDATION_PROMPT,
             )
             validated = self._parse_json(validation_raw)
             if validated:
@@ -547,47 +465,9 @@ class AiParser(BaseParser):
 
         # ── Grounding verification ──
         logger.info("AI Parser — Grounding: check against source text")
-        rows = self._ground_and_verify(client, text, rows)
+        rows = self._ground_and_verify(text, rows)
 
         return rows
-
-    # Default models for each pass
-    ANALYSIS_MODEL = "claude-haiku-4-5-20251001"  # Pass 1: structural analysis (cheap)
-    EXTRACTION_MODEL = "claude-sonnet-4-5-20250929"  # Pass 2: extraction + validation
-    GROUNDING_MODEL = "claude-sonnet-4-5-20250929"  # Pass 3: grounding verification
-
-    def _call_claude(
-        self,
-        client,
-        system: str,
-        user_content: str,
-        max_tokens: int = 4096,
-        model: str | None = None,
-    ) -> str:
-        message = client.messages.create(
-            model=model or self.EXTRACTION_MODEL,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user_content}],
-        )
-        return message.content[0].text.strip()
-
-    def _call_claude_with_content(
-        self,
-        client,
-        system: str,
-        content: list,
-        max_tokens: int = 4096,
-        model: str | None = None,
-    ) -> str:
-        """Call Claude with structured content blocks (supports PDF documents, images)."""
-        message = client.messages.create(
-            model=model or self.EXTRACTION_MODEL,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": content}],
-        )
-        return message.content[0].text.strip()
 
     @staticmethod
     def _extract_pdf_text(pdf_path: Path) -> str:
@@ -1091,7 +971,7 @@ class AiParser(BaseParser):
 
         return grounded, suspicious
 
-    def _verify_suspicious_rows(self, client, source_text: str, suspicious: list[ParsedPriceRow]) -> list[ParsedPriceRow]:
+    def _verify_suspicious_rows(self, source_text: str, suspicious: list[ParsedPriceRow]) -> list[ParsedPriceRow]:
         """Send suspicious rows to Claude for verification against the source.
 
         Returns only the rows that Claude confirms are correct.
@@ -1099,8 +979,10 @@ class AiParser(BaseParser):
         if not suspicious:
             return []
 
-        # Serialize suspicious rows for the prompt
+        from app.services.claude_sdk import call_claude_sdk
         from app.services.extraction import _row_to_dict
+
+        # Serialize suspicious rows for the prompt
         rows_json = json.dumps([_row_to_dict(r) for r in suspicious], ensure_ascii=False, indent=2)
 
         user_content = (
@@ -1108,18 +990,16 @@ class AiParser(BaseParser):
             f"SUSPICIOUS EXTRACTED ROWS:\n{rows_json}"
         )
 
-        raw = self._call_claude(
-            client,
-            system=GROUNDING_VERIFICATION_PROMPT,
-            user_content=user_content,
-            max_tokens=4096,
+        raw = call_claude_sdk(
+            prompt=user_content,
+            system_prompt=GROUNDING_VERIFICATION_PROMPT,
         )
         verified_data = self._parse_json(raw)
         if verified_data:
             return self._convert_rows(verified_data)
         return []
 
-    def _ground_and_verify(self, client, source_text: str, rows: list[ParsedPriceRow]) -> list[ParsedPriceRow]:
+    def _ground_and_verify(self, source_text: str, rows: list[ParsedPriceRow]) -> list[ParsedPriceRow]:
         """Pass 4: Ground-truth check + AI verification of suspicious rows."""
         grounded, suspicious = self._check_grounding(source_text, rows)
 
@@ -1134,7 +1014,7 @@ class AiParser(BaseParser):
         )
 
         # Ask Claude to verify the suspicious rows against the source
-        verified = self._verify_suspicious_rows(client, source_text, suspicious)
+        verified = self._verify_suspicious_rows(source_text, suspicious)
         logger.info("Grounding verification — %d/%d suspicious rows confirmed", len(verified), len(suspicious))
 
         return grounded + verified

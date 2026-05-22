@@ -167,8 +167,9 @@ def _parse_attachment(temp_file: Path, file_type: str, email_context: str = "") 
         try:
             from app.parsers.ai_parser import AiParser
             rows = AiParser().parse_pdf(temp_file)
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("AI parse_pdf failed for %s: %s", temp_file.name, exc)
         return rows
 
     # For other types, try rule-based first

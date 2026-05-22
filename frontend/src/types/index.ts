@@ -13,7 +13,11 @@ export interface Hotel {
   address: string | null;
   phone: string | null;
   email: string | null;
+  country: string | null;
+  postal_code: string | null;
+  state: string | null;
   source_document_id: number | null;
+  cmr_supplier_id: string | null;
 }
 
 export interface Price {
@@ -175,6 +179,7 @@ export interface RestaurantType {
   phone: string | null;
   email: string | null;
   source_document_id: number | null;
+  cmr_supplier_id: string | null;
 }
 
 export interface MenuSeasonDate {
@@ -271,7 +276,82 @@ export interface HotelDetail {
   address: string | null;
   phone: string | null;
   email: string | null;
+  country: string | null;
+  postal_code: string | null;
+  state: string | null;
+  cmr_supplier_id: string | null;
   prices: PriceWithoutHotel[];
+}
+
+export interface MenuPriceWithoutRestaurant {
+  id: number;
+  document_id: number | null;
+  menu_name: string | null;
+  description: string | null;
+  lunch_price: number | null;
+  dinner_price: number | null;
+  lunch_child_price: number | null;
+  dinner_child_price: number | null;
+  course_1: string | null;
+  course_2: string | null;
+  course_3: string | null;
+  course_4: string | null;
+  course_5: string | null;
+  min_pax: number | null;
+  drink_included: string | null;
+  season_code: string | null;
+  note: string | null;
+  season_dates: MenuSeasonDate[];
+}
+
+export interface RestaurantDetail {
+  id: number;
+  name: string;
+  city: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  cmr_supplier_id: string | null;
+  menu_prices: MenuPriceWithoutRestaurant[];
+}
+
+export interface CreateRestaurantResponse {
+  restaurant_id: number;
+  restaurant_name: string;
+  price_count: number;
+  message: string;
+}
+
+export interface TransportPriceWithoutCompany {
+  id: number;
+  document_id: number | null;
+  code: string | null;
+  price: number | null;
+  product: string | null;
+  bus_size: number | null;
+  service_type: string | null;
+  days: number | null;
+  route_description: string | null;
+  note: string | null;
+  city: string | null;
+}
+
+export interface TransportDetail {
+  id: number;
+  name: string;
+  code: string;
+  city: string;
+  phone: string | null;
+  email: string | null;
+  cmr_supplier_id: string | null;
+  transport_prices: TransportPriceWithoutCompany[];
+}
+
+export interface CreateTransportResponse {
+  company_id: number;
+  company_name: string;
+  price_count: number;
+  message: string;
 }
 
 export interface EmailPollingStatus {
@@ -290,6 +370,7 @@ export interface TransportCompany {
   phone: string | null;
   email: string | null;
   source_document_id: number | null;
+  cmr_supplier_id: string | null;
 }
 
 export interface TransportPrice {
@@ -312,4 +393,58 @@ export interface TransportPriceListResponse {
   total: number;
   page: number;
   page_size: number;
+}
+
+export type EmailLabel = "accommodation" | "restaurant" | "transportation" | "entrees" | "packages";
+
+export const EMAIL_LABELS: EmailLabel[] = ["accommodation", "restaurant", "transportation", "entrees", "packages"];
+
+export interface ProcessedEmail {
+  id: number;
+  message_id: string;
+  subject: string | null;
+  sender: string | null;
+  received_date: string | null;
+  document_id: number | null;
+  processed_at: string;
+  status: string;
+  notes: string | null;
+  body_text: string | null;
+  body_html: string | null;
+  attachment_names: string | null;
+  folder_id: number | null;
+  folder_name: string | null;
+  label: EmailLabel | null;
+  document_row_count: number | null;
+  document_status: string | null;
+}
+
+export interface ProcessedEmailListResponse {
+  items: ProcessedEmail[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface EmailFolderRule {
+  id: number;
+  keyword: string;
+  folder_id: number;
+  is_case_sensitive: boolean;
+  priority: number;
+  created_at: string;
+  folder_name: string | null;
+}
+
+export interface ManagedCity {
+  id: number;
+  name: string;
+  created_at: string;
+}
+
+export interface ManagedCategory {
+  id: number;
+  slug: string;
+  label: string;
+  created_at: string;
 }

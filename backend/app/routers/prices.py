@@ -11,7 +11,7 @@ from app.schemas import PriceOut, PriceListResponse
 router = APIRouter(prefix="/api/prices", tags=["prices"])
 
 
-def _apply_filters(stmt, *, city, hotel_name, season_code, fit_git, hotel_type, price_min, price_max, search, needs_join=False):
+def _apply_filters(stmt, *, city, hotel_name, season_code, fit_git, hotel_type, price_min, price_max, search, exclude_pushed=False, needs_join=False):
     """Apply common WHERE filters to a query statement."""
     if city:
         stmt = stmt.where(Hotel.city.ilike(f"%{city}%"))
@@ -33,6 +33,8 @@ def _apply_filters(stmt, *, city, hotel_name, season_code, fit_git, hotel_type, 
             | Hotel.city.ilike(f"%{search}%")
             | Price.room_desc.ilike(f"%{search}%")
         )
+    if exclude_pushed:
+        stmt = stmt.where(Hotel.cmr_supplier_id.is_(None))
     return stmt
 
 
@@ -46,13 +48,14 @@ def list_prices(
     price_min: Optional[float] = Query(None, ge=0),
     price_max: Optional[float] = Query(None, ge=0),
     search: Optional[str] = Query(None),
+    exclude_pushed: Optional[bool] = Query(None),
     max_room_types: Optional[int] = Query(None, ge=1, le=10),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    filter_kwargs = dict(city=city, hotel_name=hotel_name, season_code=season_code, fit_git=fit_git, hotel_type=hotel_type, price_min=price_min, price_max=price_max, search=search)
-    needs_join = bool(city or hotel_name or hotel_type or search)
+    filter_kwargs = dict(city=city, hotel_name=hotel_name, season_code=season_code, fit_git=fit_git, hotel_type=hotel_type, price_min=price_min, price_max=price_max, search=search, exclude_pushed=bool(exclude_pushed))
+    needs_join = bool(city or hotel_name or hotel_type or search or exclude_pushed)
 
     stmt = select(Price).options(joinedload(Price.hotel), joinedload(Price.season_dates))
     if needs_join:

@@ -87,6 +87,9 @@ def create_hotel_with_prices(body: CreateHotelWithPricesRequest, db: Session = D
         address=body.address,
         phone=body.phone,
         email=body.email,
+        country=body.country,
+        postal_code=body.postal_code,
+        state=body.state,
     )
 
     count = _save_price_rows(body.prices, hotel.id, db)
@@ -114,6 +117,9 @@ def update_hotel_with_prices(hotel_id: int, body: CreateHotelWithPricesRequest, 
     hotel.address = body.address
     hotel.phone = body.phone
     hotel.email = body.email
+    hotel.country = body.country
+    hotel.postal_code = body.postal_code
+    hotel.state = body.state
 
     # Preserve the document_id from old prices so the "View contract" link survives edits
     old_prices = (
@@ -138,6 +144,94 @@ def update_hotel_with_prices(hotel_id: int, body: CreateHotelWithPricesRequest, 
         price_count=count,
         message=f"Updated hotel '{hotel.name}' with {count} price rows",
     )
+
+
+@router.post("/from-cmr")
+def create_hotel_from_cmr(payload: dict, db: Session = Depends(get_db)):
+    """Create a hotel from CMR supplier data format.
+    If a hotel with the given cmr_supplier_id already exists, return it.
+    """
+    cmr_supplier_id = payload.get("cmr_supplier_id")
+    if not cmr_supplier_id:
+        raise HTTPException(status_code=400, detail="cmr_supplier_id is required")
+
+    # Check if hotel already exists by cmr_supplier_id
+    existing = db.query(Hotel).filter(Hotel.cmr_supplier_id == cmr_supplier_id).first()
+    if existing:
+        return {"id": existing.id, "name": existing.name, "created": False}
+
+    company_name = payload.get("company_name", "").strip()
+    city = payload.get("city", "").strip()
+    if not company_name:
+        raise HTTPException(status_code=400, detail="company_name is required")
+
+    # Parse stars from accommodation_data.etoiles (e.g. "4*" -> 4)
+    accom = payload.get("accommodation_data") or {}
+    etoiles = accom.get("etoiles", "")
+    stars = None
+    if etoiles:
+        digits = "".join(c for c in str(etoiles) if c.isdigit())
+        if digits:
+            stars = int(digits)
+
+    hotel_type = accom.get("type") or None
+
+    hotel = get_or_create_hotel(
+        db,
+        name=company_name,
+        city=city or "Unknown",
+        stars=stars,
+        hotel_type=hotel_type,
+        address=payload.get("address"),
+        phone=payload.get("phone"),
+        email=payload.get("email"),
+        cmr_supplier_id=cmr_supplier_id,
+    )
+
+    # Convert CMR rates to Reader prices
+    rates = accom.get("rates") or []
+    count = 0
+    for rate in rates:
+        double_rate = rate.get("double_rate")
+        single_rate = rate.get("single_rate")
+        twin_rate = rate.get("twin_rate")
+        triple_rate = rate.get("triple_rate")
+
+        price = Price(
+            hotel_id=hotel.id,
+            room_desc=rate.get("room_type"),
+            meal_plan=rate.get("meal_plan"),
+            double_price=Decimal(str(double_rate)) if double_rate is not None else None,
+            single_price=Decimal(str(single_rate)) if single_rate is not None else None,
+            twin_price=Decimal(str(twin_rate)) if twin_rate is not None else None,
+            triple_price=Decimal(str(triple_rate)) if triple_rate is not None else None,
+            fit_git=rate.get("fit_git"),
+            season_code=rate.get("season"),
+            note=rate.get("note"),
+        )
+        db.add(price)
+        db.flush()
+
+        # Save date ranges as SeasonDate records
+        date_ranges = rate.get("date_ranges") or []
+        for dr in date_ranges:
+            date_from = dr.get("from") or dr.get("date_from")
+            date_to = dr.get("to") or dr.get("date_to")
+            if date_from and date_to:
+                try:
+                    season_date = SeasonDate(
+                        price_id=price.id,
+                        date_from=date.fromisoformat(date_from),
+                        date_to=date.fromisoformat(date_to),
+                    )
+                    db.add(season_date)
+                except (ValueError, TypeError):
+                    pass  # Skip invalid dates
+
+        count += 1
+
+    db.commit()
+    return {"id": hotel.id, "name": hotel.name, "created": True, "price_count": count}
 
 
 @router.delete("/{hotel_id}")

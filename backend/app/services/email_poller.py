@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import imaplib
+import json
 import email as email_lib
 from email import policy
 from email.utils import parsedate_to_datetime
@@ -12,8 +13,74 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Document, ProcessedEmail
 from app.services.extraction import parse_document
+from app.services.email_folder_rules import apply_keyword_rules
+from app.services.email_labeler import auto_detect_label
+from app.services.folder_service import auto_assign_folder
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_name_city(body_text: str) -> tuple[str, str]:
+    """Extract entity name and city from the first lines of email body.
+
+    Expected format (each separated by blank lines):
+        Line 1: Entity name  (e.g. "Kenzi Solazur Hotel")
+        Line 3: City         (e.g. "Tanger")
+    Returns (name, city). Either may be empty.
+    """
+    if not body_text:
+        return "", ""
+    # Split into non-empty lines, stopping at forwarded-message markers
+    lines: list[str] = []
+    for raw in body_text.splitlines():
+        stripped = raw.strip().strip("*")  # strip markdown-bold markers
+        if stripped.startswith("----") or stripped.lower().startswith("x-mozilla"):
+            break
+        if stripped:
+            lines.append(stripped)
+        if len(lines) >= 2:
+            break
+    name = lines[0] if len(lines) >= 1 else ""
+    city = lines[1] if len(lines) >= 2 else ""
+    # Sanity: skip if the "name" looks like a header or is too long
+    if len(name) > 120 or ":" in name:
+        return "", ""
+    if len(city) > 60 or ":" in city:
+        return name, ""
+    return name, city
+
+
+def _apply_body_entity(body_text: str, document: Document, db) -> None:
+    """Set entity name + city on the document from the email body first lines."""
+    name, city = _extract_name_city(body_text)
+    if not name:
+        return
+
+    category = document.document_category or "hotel"
+    name_key = {
+        "restaurant": "restaurant_name",
+        "transportation": "company_name",
+    }.get(category, "accommodation")
+
+    if document.parsed_rows_json:
+        rows = json.loads(document.parsed_rows_json)
+    else:
+        rows = [{}]
+
+    for row in rows:
+        if not row.get(name_key):
+            row[name_key] = name
+        if city and not row.get("city"):
+            row["city"] = city
+
+    document.parsed_rows_json = json.dumps(rows)
+
+    # Re-assign folder based on the newly set city
+    if city and document.folder_id is None:
+        auto_assign_folder(document, db)
+
+    db.commit()
+    logger.info("Auto-labeled document %d: name=%s, city=%s", document.id, name, city)
 
 
 def poll_gmail() -> None:
@@ -83,6 +150,28 @@ def _process_single_email(imap, email_id: bytes, db) -> None:
         except Exception:
             pass
 
+    # Extract body and attachment info
+    body_text = ""
+    body_html = ""
+    attachment_names = []
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        disposition = str(part.get("Content-Disposition", ""))
+        if "attachment" in disposition:
+            fname = part.get_filename()
+            if fname:
+                attachment_names.append(fname)
+        elif content_type == "text/plain" and not body_text:
+            payload = part.get_content()
+            if isinstance(payload, str):
+                body_text = payload
+        elif content_type == "text/html" and not body_html:
+            payload = part.get_content()
+            if isinstance(payload, str):
+                body_html = payload
+
+    attachment_names_json = json.dumps(attachment_names) if attachment_names else None
+
     # Save raw .eml to uploads/
     safe_subject = re.sub(r'[^\w\s-]', '', subject)[:50].strip()
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -99,6 +188,9 @@ def _process_single_email(imap, email_id: bytes, db) -> None:
     db.add(document)
     db.commit()
     db.refresh(document)
+
+    # Apply keyword-based folder rules before parsing
+    apply_keyword_rules(subject, document, db)
 
     # Parse via existing pipeline
     status = "processed"
@@ -121,6 +213,13 @@ def _process_single_email(imap, email_id: bytes, db) -> None:
         db.commit()
         logger.error("Parsing failed for email %s: %s", message_id, e)
 
+    # Auto-extract entity name and city from first lines of body_text
+    # Typical format: line 1 = name, line 2 = blank, line 3 = city
+    _apply_body_entity(body_text, document, db)
+
+    # Auto-detect label from subject/body
+    label = auto_detect_label(subject, body_text)
+
     # Record in ProcessedEmail table
     record = ProcessedEmail(
         message_id=message_id,
@@ -130,6 +229,10 @@ def _process_single_email(imap, email_id: bytes, db) -> None:
         document_id=document.id,
         status=status,
         notes=notes,
+        body_text=body_text or None,
+        body_html=body_html or None,
+        attachment_names=attachment_names_json,
+        label=label,
     )
     db.add(record)
     db.commit()
