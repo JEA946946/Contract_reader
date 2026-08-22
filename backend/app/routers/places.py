@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 import httpx
 
+from app.auth import require_api_key
 from app.config import settings
 
-router = APIRouter(prefix="/api/places", tags=["places"])
+router = APIRouter(prefix="/api/places", tags=["places"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/autocomplete")

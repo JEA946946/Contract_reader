@@ -16,7 +16,9 @@ from app.schemas import (
 )
 from app.services.normalizer import get_or_create_hotel
 
-router = APIRouter(prefix="/api/hotels", tags=["hotels"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/hotels", tags=["hotels"], dependencies=[Depends(require_api_key)])
 
 
 def _save_price_rows(rows: list[ManualPriceRowSchema], hotel_id: int, db: Session, document_id: Optional[int] = None) -> int:
@@ -144,6 +146,17 @@ def update_hotel_with_prices(hotel_id: int, body: CreateHotelWithPricesRequest, 
         price_count=count,
         message=f"Updated hotel '{hotel.name}' with {count} price rows",
     )
+
+
+@router.patch("/{hotel_id}/link-document/{document_id}")
+def link_document_to_hotel(hotel_id: int, document_id: int, db: Session = Depends(get_db)):
+    """Link a document to a hotel as its source contract."""
+    hotel = db.query(Hotel).filter(Hotel.id == hotel_id).first()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    hotel.source_document_id = document_id
+    db.commit()
+    return {"hotel_id": hotel.id, "source_document_id": document_id}
 
 
 @router.post("/from-cmr")

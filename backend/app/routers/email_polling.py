@@ -13,7 +13,9 @@ from app.database import get_db
 from app.models import ProcessedEmail, Document, Folder, EMAIL_LABELS
 from app.schemas import ProcessedEmailDetailOut, ProcessedEmailListOut, AssignFolderRequest, SetLabelRequest
 
-router = APIRouter(prefix="/api/email-polling", tags=["email-polling"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/email-polling", tags=["email-polling"], dependencies=[Depends(require_api_key)])
 
 
 class EmailPollingStatus(BaseModel):

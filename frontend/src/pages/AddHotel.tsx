@@ -20,8 +20,10 @@ import type {
 
 /* ── helpers ────────────────────────────────────────── */
 
+let _rowIdCounter = 0;
 function emptyPriceRow(): PriceRow {
   return {
+    _id: `r${++_rowIdCounter}_${Date.now()}`,
     room_desc: "",
     meal_plan: "",
     pricing_mode: "per_room",
@@ -462,12 +464,10 @@ export default function AddHotel() {
             });
           }
           seasonMap.get(key)!.prices.push({
+            ...emptyPriceRow(),
             room_desc: p.room_desc ?? "",
             meal_plan: p.meal_plan ?? "",
             pricing_mode: "per_room",
-            base_price: null,
-            tax: null,
-            sgl_supplement: null,
             double_price: p.double_price != null ? Number(p.double_price) : null,
             single_price: p.single_price != null ? Number(p.single_price) : null,
             twin_price: p.twin_price != null ? Number(p.twin_price) : null,
@@ -762,9 +762,9 @@ export default function AddHotel() {
 
   /* ── fill remaining dates ── */
   function fillRemainingDates(sIdx: number) {
+    // Collect dates from ALL seasons (including the current one)
     const occupied: { from: Date; to: Date }[] = [];
     for (let i = 0; i < seasons.length; i++) {
-      if (i === sIdx) continue;
       for (const dr of seasons[i].date_ranges) {
         if (dr.date_from && dr.date_to) {
           occupied.push({
@@ -775,27 +775,20 @@ export default function AddHotel() {
       }
     }
 
+    if (occupied.length === 0) return;
+
     occupied.sort((a, b) => a.from.getTime() - b.from.getTime());
 
     // Determine contract year (Nov 1 – Oct 31)
-    // Use earliest occupied date as reference, or the current season's
-    // first date, or today as fallback
-    let refDate: Date;
-    if (occupied.length > 0) {
-      refDate = occupied[0].from;
-    } else {
-      const ownDr = seasons[sIdx].date_ranges.find((dr) => dr.date_from);
-      refDate = ownDr ? new Date(ownDr.date_from + "T00:00:00") : new Date();
-    }
-
+    const earliest = occupied[0].from;
     let contractStart: Date;
     let contractEnd: Date;
-    if (refDate.getMonth() >= 10) {
-      contractStart = new Date(refDate.getFullYear(), 10, 1);
-      contractEnd = new Date(refDate.getFullYear() + 1, 9, 31);
+    if (earliest.getMonth() >= 10) {
+      contractStart = new Date(earliest.getFullYear(), 10, 1);
+      contractEnd = new Date(earliest.getFullYear() + 1, 9, 31);
     } else {
-      contractStart = new Date(refDate.getFullYear() - 1, 10, 1);
-      contractEnd = new Date(refDate.getFullYear(), 9, 31);
+      contractStart = new Date(earliest.getFullYear() - 1, 10, 1);
+      contractEnd = new Date(earliest.getFullYear(), 9, 31);
     }
 
     // Find gaps between occupied ranges within contract year
@@ -831,9 +824,22 @@ export default function AddHotel() {
       return `${y}-${m}-${dy}`;
     };
 
-    updateSeason(sIdx, {
+    // Create a new season with the remaining date gaps
+    // Clone price row structure from the current season (with zeroed prices)
+    const templatePrices = seasons[sIdx].prices.map((p) => ({
+      ...emptyPriceRow(),
+      room_desc: p.room_desc,
+      meal_plan: p.meal_plan,
+      fit_git: p.fit_git,
+    }));
+
+    const newSeason: SeasonBlock = {
+      season_code: "",
       date_ranges: gaps.map((g) => ({ date_from: fmt(g.from), date_to: fmt(g.to) })),
-    });
+      prices: templatePrices.length > 0 ? templatePrices : [emptyPriceRow()],
+    };
+
+    setSeasons((prev) => [...prev, newSeason]);
   }
 
   /* ── save ── */
@@ -1727,7 +1733,7 @@ export default function AddHotel() {
                   };
 
                   return (
-                    <div key={pIdx} style={{ display: "flex", gap: "0.4rem", alignItems: "flex-start", marginBottom: "0.35rem" }}>
+                    <div key={row._id} style={{ display: "flex", gap: "0.4rem", alignItems: "flex-start", marginBottom: "0.35rem" }}>
                       {/* Room Type */}
                       <div style={{ width: 160, flex: 1 }}>
                         <input style={inp} value={row.room_desc} onChange={(e) => updatePriceRow(sIdx, pIdx, { room_desc: e.target.value })} placeholder="e.g. Std" />
@@ -1916,9 +1922,7 @@ export default function AddHotel() {
                           disabled={pIdx === season.prices.length - 1}
                           title="Move down"
                         >&#9660;</button>
-                        {season.prices.length > 1 && (
-                          <button style={xBtn} onClick={() => removePriceRow(sIdx, pIdx)}>x</button>
-                        )}
+                        <button style={xBtn} onClick={() => removePriceRow(sIdx, pIdx)}>x</button>
                       </div>
                     </div>
                   );
@@ -1942,7 +1946,7 @@ export default function AddHotel() {
                     {season.prices.map((row, pIdx) => {
                       if (row.pricing_mode === "per_room") return null;
                       return (
-                        <div key={pIdx} style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                        <div key={row._id} style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
                           <span style={{ fontWeight: 600, color: "#92400e", minWidth: 80 }}>
                             {row.room_desc || "Row " + (pIdx + 1)} {row.meal_plan ? `(${row.meal_plan})` : ""}:
                           </span>
@@ -1983,22 +1987,49 @@ export default function AddHotel() {
             </div>
           ))}
 
-          {/* Add Season */}
-          <button
-            onClick={() => setSeasons((prev) => [...prev, emptySeason()])}
-            style={{
-              background: "#e94560",
-              color: "#fff",
-              border: "none",
-              padding: "0.5rem 1.2rem",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: "0.9rem",
-            }}
-          >
-            + Add Season
-          </button>
+          {/* Add Season + Reset */}
+          <div style={{ display: "flex", gap: "0.75rem" }}>
+            <button
+              onClick={() => setSeasons((prev) => [...prev, emptySeason()])}
+              style={{
+                background: "#e94560",
+                color: "#fff",
+                border: "none",
+                padding: "0.5rem 1.2rem",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: "0.9rem",
+              }}
+            >
+              + Add Season
+            </button>
+            <button
+              onClick={() => {
+                if (!confirm("Reset all seasons and prices? This cannot be undone.")) return;
+                setSeasons([]);
+                setSetupSeasons([""]);
+                setSetupRoomTypes([""]);
+                setSetupMealPlans([]);
+                setSetupFitGit([]);
+                setHotelTax(null);
+                setHbSupplement(null);
+                setRoomAddOns({});
+              }}
+              style={{
+                background: "transparent",
+                color: "#ef4444",
+                border: "1px solid #ef4444",
+                padding: "0.5rem 1.2rem",
+                borderRadius: 6,
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: "0.9rem",
+              }}
+            >
+              Reset Prices
+            </button>
+          </div>
         </div>
       )}
 

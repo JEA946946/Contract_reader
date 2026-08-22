@@ -18,7 +18,9 @@ from app.schemas import (
     RestaurantDetailOut,
 )
 
-router = APIRouter(prefix="/api/restaurants", tags=["restaurants"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/restaurants", tags=["restaurants"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("", response_model=MenuPriceListResponse)

@@ -37,7 +37,9 @@ from app.services.transport_normalizer import save_parsed_transport_rows
 from app.services.folder_service import auto_assign_folder
 from app.parsers.base import ParsedPriceRow, ParsedMenuRow, ParsedDateRange, ParsedTransportRow
 
-router = APIRouter(prefix="/api/documents", tags=["documents"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/documents", tags=["documents"], dependencies=[Depends(require_api_key)])
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "xlsx", "xls", "csv", "txt", "eml", "msg"}
 

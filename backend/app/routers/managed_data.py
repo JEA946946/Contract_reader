@@ -15,7 +15,9 @@ from app.schemas import (
     ManagedCategoryOut,
 )
 
-router = APIRouter(prefix="/api/managed", tags=["managed-data"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/managed", tags=["managed-data"], dependencies=[Depends(require_api_key)])
 
 
 # ── Cities ──────────────────────────────────────────────

@@ -220,6 +220,7 @@ export interface MenuPriceListResponse {
 export type PricingMode = "per_person" | "half_double" | "per_room";
 
 export interface PriceRow {
+  _id: string;
   room_desc: string;
   meal_plan: string;
   pricing_mode: PricingMode;

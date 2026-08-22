@@ -16,7 +16,9 @@ from app.schemas import (
     DocumentOut,
 )
 
-router = APIRouter(prefix="/api/folders", tags=["folders"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/folders", tags=["folders"], dependencies=[Depends(require_api_key)])
 
 
 def _build_tree(folders: list[Folder], doc_counts: dict[int, int]) -> list[dict]:

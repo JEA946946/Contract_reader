@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, func, text
 
+from app.auth import require_api_key
 from app.config import settings
 from app.database import engine, Base, get_db, SessionLocal
 from app.models import Document, Hotel, Price, Restaurant, MenuPrice, TransportCompany, TransportPrice, Folder
@@ -321,7 +322,7 @@ def on_shutdown():
     stop_scheduler()
 
 
-@app.get("/api/stats", response_model=StatsOut)
+@app.get("/api/stats", response_model=StatsOut, dependencies=[Depends(require_api_key)])
 def get_stats():
     db = SessionLocal()
     try:

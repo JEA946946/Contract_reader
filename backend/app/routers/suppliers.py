@@ -12,7 +12,9 @@ from app.database import get_db
 from app.config import settings
 from app.models import Hotel, Price, SeasonDate, Restaurant, MenuPrice, MenuSeasonDate, TransportCompany, TransportPrice
 
-router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/suppliers", tags=["suppliers"], dependencies=[Depends(require_api_key)])
 
 
 class LinkRequest(BaseModel):
@@ -106,6 +108,7 @@ def search_cmr_suppliers(search: Optional[str] = None, category: Optional[str] =
     headers = {"Host": "crm.vmmorocco.com"}
     if settings.cmr_api_token:
         headers["Authorization"] = f"Bearer {settings.cmr_api_token}"
+        headers["X-API-Key"] = settings.cmr_api_token
 
     try:
         resp = httpx.get(
@@ -128,11 +131,15 @@ def _push_to_cmr(payload: dict) -> dict:
     if not settings.cmr_api_base:
         raise HTTPException(status_code=503, detail="CMR API not configured")
 
+    headers = {"Host": "crm.vmmorocco.com"}
+    if settings.cmr_api_token:
+        headers["X-API-Key"] = settings.cmr_api_token
+
     try:
         resp = httpx.post(
             f"{settings.cmr_api_base}/integrations/suppliers/push",
             json=payload,
-            headers={"Host": "crm.vmmorocco.com"},
+            headers=headers,
             timeout=15.0,
         )
         resp.raise_for_status()

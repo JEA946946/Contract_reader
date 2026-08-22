@@ -8,7 +8,9 @@ from app.database import get_db
 from app.models import Price, Hotel, SeasonDate
 from app.schemas import PriceOut, PriceListResponse
 
-router = APIRouter(prefix="/api/prices", tags=["prices"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/prices", tags=["prices"], dependencies=[Depends(require_api_key)])
 
 
 def _apply_filters(stmt, *, city, hotel_name, season_code, fit_git, hotel_type, price_min, price_max, search, exclude_pushed=False, needs_join=False):

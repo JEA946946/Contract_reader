@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import pdfplumber
 import pandas as pd
@@ -9,6 +10,8 @@ from datetime import date
 from app.parsers.base import BaseParser, ParsedPriceRow, ParsedDateRange
 from app.parsers.excel_parser import ExcelParser
 from app.utils import parse_price
+
+logger = logging.getLogger(__name__)
 
 # French month names -> month numbers
 FRENCH_MONTHS = {
@@ -603,13 +606,34 @@ def apply_double_supplements(rows: list[ParsedPriceRow]) -> list[ParsedPriceRow]
     return result
 
 
+HEADER_KEYWORDS = {
+    "room", "price", "double", "single", "twin", "tarif", "saison",
+    "type", "hotel", "chambre", "periode", "season", "rate", "category",
+    "accommodation", "dbl", "sgl", "twn", "meal", "date", "from", "to",
+    "pension", "board", "formule", "triple", "quad", "city", "stars",
+    "etoiles", "supplement", "personne", "nuit", "night",
+}
+
+
 def _find_header_row_index(table: list[list]) -> int:
-    """Find the actual header row, skipping title/super-header rows with mostly empty cells."""
-    for i, row in enumerate(table):
-        non_empty = sum(1 for cell in row if cell and str(cell).strip())
-        if non_empty >= len(row) * 0.5:
-            return i
-    return 0
+    """Find the actual header row using keyword scoring.
+
+    Scores each of the first 5 rows by:
+    - Number of non-empty cells
+    - Number of header-keyword matches (weighted 2x)
+    Returns the row with the highest score.
+    """
+    best_idx = 0
+    best_score = -1
+    for i, row in enumerate(table[:5]):
+        cells = [str(c).strip().lower() for c in row if c]
+        non_empty = len(cells)
+        keyword_hits = sum(1 for c in cells for kw in HEADER_KEYWORDS if kw in c)
+        score = non_empty + keyword_hits * 2
+        if score > best_score:
+            best_score = score
+            best_idx = i
+    return best_idx
 
 
 def _parse_dd_mm(dd_mm: str, year: int) -> date | None:
@@ -1705,97 +1729,121 @@ class PdfParser(BaseParser):
     def parse(self, file_path: Path) -> list[ParsedPriceRow]:
         all_rows = []
 
-        with pdfplumber.open(file_path) as pdf:
-            # Phase 4.1: Detect scanned/image-only PDFs
-            total_text = ""
-            for page in pdf.pages[:3]:  # Check first 3 pages
-                total_text += (page.extract_text() or "")
-                if len(total_text) >= self.MIN_TEXT_LENGTH:
-                    break
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                logger.info("PdfParser: opened %s (%d pages)", file_path.name, len(pdf.pages))
 
-            if len(total_text.strip()) < self.MIN_TEXT_LENGTH:
-                # Scanned PDF — return empty so AI vision fallback triggers
-                import logging
-                logging.getLogger(__name__).info(
-                    "PDF has < %d chars of text (%d found) — flagging as scanned for AI vision fallback",
-                    self.MIN_TEXT_LENGTH, len(total_text.strip()),
-                )
-                return []
-            # Pre-scan all pages for supplement tables and extra bed rules
-            supplements = _extract_supplements_from_tables(pdf)
+                # Phase 4.1: Detect scanned/image-only PDFs
+                total_text = ""
+                for page in pdf.pages[:3]:  # Check first 3 pages
+                    total_text += (page.extract_text() or "")
+                    if len(total_text) >= self.MIN_TEXT_LENGTH:
+                        break
 
-            # Also check page text for supplements (merge, table wins)
-            all_text_lines: list[str] = []
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                all_text_lines.extend(text.split('\n'))
-            text_supps = _extract_supplements_from_text(all_text_lines)
-            for k, v in text_supps.items():
-                if k not in supplements:
-                    supplements[k] = v
-
-            extra_bed_rules = _extract_extra_bed_rules(pdf)
-
-            # Try table-based parsing (structured PDFs)
-            for page in pdf.pages:
-                tables = page.extract_tables()
-                page_text = page.extract_text() or ""
-                page_lines = page_text.split('\n')
-
-                for table in tables:
-                    if not table or len(table) < 2:
-                        continue
-
-                    # Find actual header row (skip title/super-header rows)
-                    header_idx = _find_header_row_index(table)
-                    header = [
-                        str(cell).strip() if cell else f"col_{i}"
-                        for i, cell in enumerate(table[header_idx])
-                    ]
-                    data_rows = table[header_idx + 1:]
-
-                    if not data_rows:
-                        continue
-
-                    # Try ExcelParser directly on DataFrame (no temp file)
-                    df = pd.DataFrame(data_rows, columns=header)
-                    parser = ExcelParser()
-                    rows = parser.parse_dataframe(df)
-                    all_rows.extend(rows)
-
-                    # If ExcelParser returned nothing useful, try specialised parsers
-                    has_prices = any(
-                        r.double_price or r.single_price or r.twin_price
-                        for r in rows
+                if len(total_text.strip()) < self.MIN_TEXT_LENGTH:
+                    # Scanned PDF — return empty so AI vision fallback triggers
+                    logger.info(
+                        "PDF has < %d chars of text (%d found) — flagging as scanned for AI vision fallback",
+                        self.MIN_TEXT_LENGTH, len(total_text.strip()),
                     )
-                    if not has_prices:
-                        # Remove the empty rows ExcelParser may have returned
-                        if rows:
-                            all_rows = [r for r in all_rows if r not in rows]
+                    return []
 
-                        # Try DD/MM season-table parser (RIAD ALIYA style)
-                        direct_rows = _parse_season_price_table(
-                            table, header_idx, page_lines,
-                            supplements, extra_bed_rules,
-                        )
-                        if direct_rows:
-                            all_rows.extend(direct_rows)
-                        else:
-                            # Try RSP/Nett table parser (Palace Africa style)
-                            rsp_nett_rows = _parse_rsp_nett_table(
-                                table, page_lines, supplements,
+                # Pre-scan all pages for supplement tables and extra bed rules
+                supplements = _extract_supplements_from_tables(pdf)
+
+                # Also check page text for supplements (merge, table wins)
+                all_text_lines: list[str] = []
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    all_text_lines.extend(text.split('\n'))
+                text_supps = _extract_supplements_from_text(all_text_lines)
+                for k, v in text_supps.items():
+                    if k not in supplements:
+                        supplements[k] = v
+
+                extra_bed_rules = _extract_extra_bed_rules(pdf)
+
+                # Try table-based parsing (structured PDFs)
+                total_tables = 0
+                for page_num, page in enumerate(pdf.pages):
+                    try:
+                        tables = page.extract_tables()
+                        page_text = page.extract_text() or ""
+                        page_lines = page_text.split('\n')
+                    except Exception as e:
+                        logger.warning("PdfParser: failed to extract tables from page %d: %s", page_num + 1, e)
+                        continue
+
+                    total_tables += len(tables)
+
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+
+                        try:
+                            # Find actual header row (skip title/super-header rows)
+                            header_idx = _find_header_row_index(table)
+                            header = [
+                                str(cell).strip() if cell else f"col_{i}"
+                                for i, cell in enumerate(table[header_idx])
+                            ]
+                            data_rows = table[header_idx + 1:]
+
+                            if not data_rows:
+                                continue
+
+                            # Try ExcelParser directly on DataFrame (no temp file)
+                            df = pd.DataFrame(data_rows, columns=header)
+                            parser = ExcelParser()
+                            rows = parser.parse_dataframe(df)
+
+                            # Only add rows if they contain actual prices
+                            has_prices = any(
+                                r.double_price or r.single_price or r.twin_price
+                                for r in rows
                             )
-                            if rsp_nett_rows:
-                                all_rows.extend(rsp_nett_rows)
+                            if has_prices:
+                                all_rows.extend(rows)
+                                logger.debug("PdfParser: ExcelParser found %d rows with prices on page %d", len(rows), page_num + 1)
                             else:
-                                # Try FIT/GIT contract table parser
-                                fit_git_rows = _parse_fit_git_contract_table(
-                                    table, page_lines, all_text_lines,
+                                # Try DD/MM season-table parser (RIAD ALIYA style)
+                                direct_rows = _parse_season_price_table(
+                                    table, header_idx, page_lines,
+                                    supplements, extra_bed_rules,
                                 )
-                                all_rows.extend(fit_git_rows)
+                                if direct_rows:
+                                    all_rows.extend(direct_rows)
+                                    logger.debug("PdfParser: season-price parser found %d rows on page %d", len(direct_rows), page_num + 1)
+                                else:
+                                    # Try RSP/Nett table parser (Palace Africa style)
+                                    rsp_nett_rows = _parse_rsp_nett_table(
+                                        table, page_lines, supplements,
+                                    )
+                                    if rsp_nett_rows:
+                                        all_rows.extend(rsp_nett_rows)
+                                        logger.debug("PdfParser: RSP/Nett parser found %d rows on page %d", len(rsp_nett_rows), page_num + 1)
+                                    else:
+                                        # Try FIT/GIT contract table parser
+                                        fit_git_rows = _parse_fit_git_contract_table(
+                                            table, page_lines, all_text_lines,
+                                        )
+                                        if fit_git_rows:
+                                            all_rows.extend(fit_git_rows)
+                                            logger.debug("PdfParser: FIT/GIT parser found %d rows on page %d", len(fit_git_rows), page_num + 1)
+                        except Exception as e:
+                            logger.warning("PdfParser: failed to parse table on page %d: %s", page_num + 1, e)
+                            continue
 
-            # If table-based parsing found nothing, try text-based chain contract parsing
-            if not all_rows:
-                all_rows = parse_chain_contract_pages(pdf)
+                logger.info("PdfParser: processed %d tables across %d pages, found %d rows", total_tables, len(pdf.pages), len(all_rows))
+
+                # If table-based parsing found nothing, try text-based chain contract parsing
+                if not all_rows:
+                    logger.info("PdfParser: no table rows found, trying text-based chain contract parsing")
+                    all_rows = parse_chain_contract_pages(pdf)
+                    if all_rows:
+                        logger.info("PdfParser: chain contract parser found %d rows", len(all_rows))
+
+        except Exception as e:
+            logger.warning("PdfParser failed for %s: %s — falling back to AI", file_path.name, e)
 
         return all_rows

@@ -150,6 +150,8 @@ export default function Review() {
   const [attachments, setAttachments] = useState<DocumentAttachment[]>([]);
   const [selectedAtt, setSelectedAtt] = useState(0);
   const [fileType, setFileType] = useState<string>("");
+  const [textContent, setTextContent] = useState<string | null>(null);
+  const [textLoading, setTextLoading] = useState(false);
 
   // If no state (direct navigation / refresh), fetch rows from backend
   useEffect(() => {
@@ -220,6 +222,20 @@ export default function Review() {
       })
       .catch(() => setAttachments([]));
   }, [showPreview, documentId]);
+
+  // Load text content for text-based files
+  const isTextFile = ["txt", "csv", "text"].includes(fileType);
+  useEffect(() => {
+    if (!showPreview || !documentId || !isTextFile) {
+      setTextContent(null);
+      return;
+    }
+    setTextLoading(true);
+    fetch(getDocumentFileUrl(Number(documentId)))
+      .then((res) => res.text())
+      .then((text) => { setTextContent(text); setTextLoading(false); })
+      .catch(() => { setTextContent(null); setTextLoading(false); });
+  }, [showPreview, documentId, isTextFile]);
 
   const updateRow = (index: number, field: keyof ParsedRow, value: unknown) => {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
@@ -316,7 +332,7 @@ export default function Review() {
   const currentAtt = attachments[selectedAtt];
   const canEmbed = currentAtt
     ? currentAtt.content_type === "application/pdf"
-    : fileType === "pdf";
+    : fileType === "pdf" || isTextFile;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 3rem)" }}>
@@ -585,15 +601,17 @@ export default function Review() {
                       </td>
                       <td style={{ padding: "4px 4px" }}>
                         <select
-                          style={{ ...inputStyle, width: 60 }}
+                          style={{ ...inputStyle, width: 80 }}
                           value={row.fit_git ?? ""}
                           onChange={(e) =>
                             updateRow(i, "fit_git", e.target.value || null)
                           }
                         >
                           <option value="">--</option>
-                          <option value="I">I</option>
-                          <option value="G">G</option>
+                          <option value="FIT">FIT</option>
+                          <option value="GIT">GIT</option>
+                          <option value="Series">Series</option>
+                          <option value="All">All</option>
                         </select>
                       </td>
                       <td style={{ padding: "4px 4px", minWidth: 70 }}>
@@ -760,7 +778,34 @@ export default function Review() {
             )}
 
             {/* Preview content */}
-            {previewUrl && canEmbed ? (
+            {isTextFile && showPreview ? (
+              textLoading ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
+                  Loading text...
+                </div>
+              ) : textContent ? (
+                <pre
+                  style={{
+                    flex: 1,
+                    margin: 0,
+                    padding: "1rem",
+                    overflow: "auto",
+                    fontSize: "0.8rem",
+                    lineHeight: 1.5,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    background: "#fafafa",
+                    fontFamily: "'Courier New', Courier, monospace",
+                  }}
+                >
+                  {textContent}
+                </pre>
+              ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#999" }}>
+                  No content available
+                </div>
+              )
+            ) : previewUrl && canEmbed ? (
               <iframe
                 src={previewUrl}
                 style={{

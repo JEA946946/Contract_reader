@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.exporter import export_csv, export_excel
 
-router = APIRouter(prefix="/api/export", tags=["export"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/export", tags=["export"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/csv")

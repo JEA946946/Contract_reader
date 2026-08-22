@@ -81,7 +81,7 @@ class Price(Base):
     twin_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
     triple_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
     quadruple_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
-    fit_git: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
+    fit_git: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     season_code: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     baby_discount: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     child_discount: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

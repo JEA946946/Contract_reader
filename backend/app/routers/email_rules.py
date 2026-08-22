@@ -9,7 +9,9 @@ from app.database import get_db
 from app.models import EmailFolderRule, Folder
 from app.schemas import EmailFolderRuleCreate, EmailFolderRuleUpdate, EmailFolderRuleOut
 
-router = APIRouter(prefix="/api/email-rules", tags=["email-rules"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/email-rules", tags=["email-rules"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("", response_model=List[EmailFolderRuleOut])

@@ -263,6 +263,7 @@ class HotelDetailOut(BaseModel):
     country: Optional[str] = None
     postal_code: Optional[str] = None
     state: Optional[str] = None
+    source_document_id: Optional[int] = None
     cmr_supplier_id: Optional[str] = None
     prices: List[PriceWithoutHotelOut]
 

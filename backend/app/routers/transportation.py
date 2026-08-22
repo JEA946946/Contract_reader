@@ -17,7 +17,9 @@ from app.schemas import (
     TransportDetailOut,
 )
 
-router = APIRouter(prefix="/api/transportation", tags=["transportation"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/transportation", tags=["transportation"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("", response_model=TransportPriceListResponse)
