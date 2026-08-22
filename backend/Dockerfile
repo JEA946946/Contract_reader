@@ -2,8 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# tesseract-ocr-fra/-eng are for the scanned-contract fallback in
+# app/parsers/scanned_fallback.py. Without the language data the OCR engine logs
+# "Tesseract couldn't load any languages" and falls back to something weaker: a
+# scanned contract that yielded 17,514 characters with the packs installed gave
+# 11,986 without. The supplier contracts are in French.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential default-libmysqlclient-dev pkg-config && \
+    build-essential default-libmysqlclient-dev pkg-config \
+    tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

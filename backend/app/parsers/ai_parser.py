@@ -157,39 +157,73 @@ Input text:
    Taxe prom. touristique | 8.8 | 8.8
    Taxe communale | 8.8 | 8.8"
 
-CRITICAL: Rates are per-person → convert to per-room. Taxes are separate → note them but do NOT add.
-  - DBL = per_person_rate × 2
-  - SGL = per_person_rate + single_supplement
+CRITICAL: Rates are per-person → convert to per-room. Taxes MUST be added per person before conversion.
+  - Tax = 8.8 + 8.8 = 17.6 MAD pp/pn → add to per-person rate before converting
+  - effective_pp = base_pp + 17.6
+  - DBL = effective_pp × 2
+  - SGL = effective_pp + single_supplement
   - BB, DP, AI are EACH explicitly listed with their OWN rates → extract each as a separate row
-  - Tax listed separately → note in "note" field, do NOT add to prices
 
 Correct output:
 [
   {"accommodation":"Agadir Beach Club","city":"Agadir","room_desc":"Std","stars":4,"meal_plan":"BB",
    "season_code":"A","date_ranges":[{"date_from":"2026-05-01","date_to":"2026-06-30"},{"date_from":"2026-09-01","date_to":"2026-10-31"}],
-   "single_price":880,"double_price":960,"twin_price":960,
+   "single_price":897.6,"double_price":995.2,"twin_price":995.2,
    "fit_git":"FIT","min_stay":null,
-   "note":"pp=480, sgl_supp=400. DBL=480×2=960. SGL=480+400=880. Tax 8.8+8.8=17.6 pp/pn not included."},
+   "note":"pp=480, tax=17.6 pp, effective_pp=497.6, sgl_supp=400. DBL=497.6×2=995.2. SGL=497.6+400=897.6."},
   {"accommodation":"Agadir Beach Club","city":"Agadir","room_desc":"Std","stars":4,"meal_plan":"HB",
    "season_code":"A","date_ranges":[{"date_from":"2026-05-01","date_to":"2026-06-30"},{"date_from":"2026-09-01","date_to":"2026-10-31"}],
-   "single_price":1090,"double_price":1380,"twin_price":1380,
+   "single_price":1107.6,"double_price":1415.2,"twin_price":1415.2,
    "fit_git":"FIT","min_stay":null,
-   "note":"pp=690, sgl_supp=400. DBL=690×2=1380. SGL=690+400=1090. Tax 8.8+8.8=17.6 pp/pn not included."},
+   "note":"pp=690, tax=17.6 pp, effective_pp=707.6, sgl_supp=400. DBL=707.6×2=1415.2. SGL=707.6+400=1107.6."},
   {"accommodation":"Agadir Beach Club","city":"Agadir","room_desc":"Std","stars":4,"meal_plan":"HB",
    "season_code":"C","date_ranges":[{"date_from":"2026-07-01","date_to":"2026-08-31"}],
-   "single_price":1260,"double_price":1720,"twin_price":1720,
+   "single_price":1277.6,"double_price":1755.2,"twin_price":1755.2,
    "fit_git":"FIT","min_stay":3,
-   "note":"pp=860, sgl_supp=400. DBL=860×2=1720. SGL=860+400=1260. Tax 8.8+8.8=17.6 pp/pn not included."},
+   "note":"pp=860, tax=17.6 pp, effective_pp=877.6, sgl_supp=400. DBL=877.6×2=1755.2. SGL=877.6+400=1277.6."},
   {"accommodation":"Agadir Beach Club","city":"Agadir","room_desc":"Std","stars":4,"meal_plan":"AI",
    "season_code":"A","date_ranges":[{"date_from":"2026-05-01","date_to":"2026-06-30"},{"date_from":"2026-09-01","date_to":"2026-10-31"}],
-   "single_price":1450,"double_price":2100,"twin_price":2100,
+   "single_price":1467.6,"double_price":2135.2,"twin_price":2135.2,
    "fit_git":"FIT","min_stay":null,
-   "note":"pp=1050, sgl_supp=400. DBL=1050×2=2100. SGL=1050+400=1450. Tax 8.8+8.8=17.6 pp/pn not included."},
+   "note":"pp=1050, tax=17.6 pp, effective_pp=1067.6, sgl_supp=400. DBL=1067.6×2=2135.2. SGL=1067.6+400=1467.6."},
   {"accommodation":"Agadir Beach Club","city":"Agadir","room_desc":"Std","stars":4,"meal_plan":"AI",
    "season_code":"C","date_ranges":[{"date_from":"2026-07-01","date_to":"2026-08-31"}],
-   "single_price":1600,"double_price":2400,"twin_price":2400,
+   "single_price":1617.6,"double_price":2435.2,"twin_price":2435.2,
    "fit_git":"FIT","min_stay":3,
-   "note":"pp=1200, sgl_supp=400. DBL=1200×2=2400. SGL=1200+400=1600. Tax 8.8+8.8=17.6 pp/pn not included."}
+   "note":"pp=1200, tax=17.6 pp, effective_pp=1217.6, sgl_supp=400. DBL=1217.6×2=2435.2. SGL=1217.6+400=1617.6."}
+]
+
+--- EXAMPLE 6: Table where BB and HB are BOTH explicit rates (not supplements) ---
+Input text (from a single table):
+  "INDIVIDUELS  1/2 DBL BB occupancy  NET RATE  380  420
+   Superior     1/2 DBL HB occupancy  NET RATE  480  520
+   Supp Single  NET RATE                        300  320
+   Supp Suite   NET RATE                        500  500
+   Meal Plan: BB- HB  Supp Triple NET RATE  -10% sur 3eme pax  -10% sur 3eme pax"
+
+CRITICAL: "1/2 DBL BB ... 380/420" and "1/2 DBL HB ... 480/520" are TWO separate EXPLICIT rates
+in the SAME section for the SAME room type. The first column often alternates between
+category label (INDIVIDUELS) and room type label (Superior) on consecutive lines — they
+belong to the SAME section.
+  - BOTH lines produce separate rows: one for BB, one for HB
+  - BB: pp=380/420 (Low/High) → separate rows per season
+  - HB: pp=480/520 (Low/High) → separate rows per season
+  - Do NOT skip the HB line — it has its own explicit rate, not just a supplement!
+
+Correct output (4 rows — BB×2 seasons + HB×2 seasons):
+[
+  {"accommodation":"...","room_desc":"Superior","meal_plan":"BB","season_code":"L",
+   "double_price":760,"single_price":680,"twin_price":760,"fit_git":"FIT",
+   "note":"½ dbl pp=380. DBL=380×2=760. SGL=380+300=680."},
+  {"accommodation":"...","room_desc":"Superior","meal_plan":"BB","season_code":"H",
+   "double_price":840,"single_price":740,"twin_price":840,"fit_git":"FIT",
+   "note":"½ dbl pp=420. DBL=420×2=840. SGL=420+320=740."},
+  {"accommodation":"...","room_desc":"Superior","meal_plan":"HB","season_code":"L",
+   "double_price":960,"single_price":780,"twin_price":960,"fit_git":"FIT",
+   "note":"½ dbl pp=480. DBL=480×2=960. SGL=480+300=780."},
+  {"accommodation":"...","room_desc":"Superior","meal_plan":"HB","season_code":"H",
+   "double_price":1040,"single_price":840,"twin_price":1040,"fit_git":"FIT",
+   "note":"½ dbl pp=520. DBL=520×2=1040. SGL=520+320=840."}
 ]
 
 --- EXAMPLE 3: Season names defined separately from rates ---
@@ -223,7 +257,7 @@ Now extract ALL rate data using your analysis above as a guide.
 EXTRACTION RULES:
 1. Use your analysis to navigate the document — do not re-discover structure, use what you found
 2. Cross-reference season names to their date definitions (you noted where these are in your analysis)
-3. Apply SINGLE SUPPLEMENT inline — if base DBL = 100 and single supplement = +30, output single_price = 130 and note it. But do NOT apply meal supplements or taxes to prices (see rules 13, 14).
+3. Apply SINGLE SUPPLEMENT inline — if base DBL = 100 and single supplement = +30, output single_price = 130 and note it. But do NOT apply meal supplements to prices (see rule 13). For taxes, see rule 14.
 4. **PER-PERSON / "½ DOUBLE" CONVERSION** (CRITICAL — get this right):
    - "½ chambre double", "½ double", "1/2 chambre double", "per person per night", "pp/pn", "par personne" all mean PER-PERSON rate
    - The per-person rate is the BASE for ALL calculations:
@@ -241,23 +275,32 @@ EXTRACTION RULES:
 9. If a field is genuinely absent from the document, use null — do not invent values
 10. Output one row per hotel × room_type × season × meal_plan combination. Set room_desc to the room type (Std, Superior, Deluxe, Suite, Junior Suite, etc.). Use "Std" for standard/default rooms.
     CRITICAL — "Single", "Double", "Triple" and "Quadruple" are OCCUPANCY TYPES, not room types. A "Chambre Single" and "Chambre Double" are the SAME standard room ("Std") with 1 or 2 guests. Merge them into ONE row: single_price from the single rate, double_price from the double rate. "Chambre Triple" is triple occupancy — put its rate in triple_price. "Chambre Quadruple" is quadruple occupancy — put its rate in quadruple_price. NEVER create a room_desc of "Single", "Double", "Triple" or "Quadruple" — these are occupancy, not room names.
-11. FIT/GIT: use "FIT" for individual rates, "GIT" for group rates. If both, output separate rows.
-12. When the document has BOTH individual/FIT rates AND group/GIT rates, output SEPARATE rows for each.
-13. **MEAL PLAN SUPPLEMENTS** (IMPORTANT — do NOT invent rows):
-   - Only create a row for a meal plan if the document EXPLICITLY lists a RATE for that meal plan (e.g., a separate table row showing "HB: 690 per person" or "Demi-Pension: 850 per room").
-   - If the document only MENTIONS a supplement amount (e.g., "Supplément Demi-Pension: 200 MAD pp" or "DP supplement available"), do NOT create computed HB/DP rows. Instead, note the supplement in the "note" field of the BB row (e.g., "HB supplement 200 MAD pp available").
-   - The difference: "HB rate = 690" is an explicit rate → create an HB row. "HB supplement = +200 pp on top of BB" is a supplement → note it, don't compute.
-14. **TOURIST TAX / TAXE DE SÉJOUR** (IMPORTANT — do NOT add to prices):
-   - NEVER add taxes to prices. Extract prices exactly as written in the document.
-   - If the document mentions "taxe de séjour", "tourist tax", "city tax", "taxe de promotion touristique", "taxe communale", etc., note the tax amount in the "note" field.
-   - Example: rate = 900 MAD HT, tax = 25 MAD pp/pn → double_price = 900, note = "Tax 25 MAD pp/pn not included"
-   - This applies even when converting per-person → per-room: only convert the BASE rate, do NOT add tax.
-   - Example: pp=480, sgl_supp=400, tax=17.6 pp → DBL=480×2=960, SGL=480+400=880, note = "Tax 17.6 pp/pn not included"
+11. FIT/GIT/Series: use "FIT" for individual rates, "GIT" for group inclusive tour rates, "Series" for series/circuit rates (regular group departures, often labeled "circuits et séries", "séries", "loisir"). If multiple, output separate rows for each.
+12. When the document has BOTH individual/FIT rates AND group/series rates, output SEPARATE rows for each.
+    KEY DISTINCTION: If a table is labeled "CIRCUITS ET SERIES" or "SERIES (LOISIR)" → fit_git = "Series".
+    If labeled "FIT", "CORPORATE", "INDIVIDUELS", "GROUPES SPECIAUX" → fit_git = "FIT" or "GIT" as appropriate.
+13. **MEAL PLAN SUPPLEMENTS** (IMPORTANT):
+   - If the document has an EXPLICIT RATE for HB/FB/AI (e.g., a separate table row "HB: 690 per person" or "1/2 DBL HB occupancy 480"), create a row for that meal plan directly.
+   - If a meal supplement appears as a DEDICATED COLUMN in the same rate table (e.g., "Supp. Repas", "Supplément Repas", "Supp HB"), COMPUTE and output HB rows by adding the supplement to the base BB rates. The supplement is typically per person: add once to SGL, add ×2 to DBL/TWN.
+     Example: BB rates SGL=680, DBL=720, Supp Repas=220 pp → HB SGL=680+220=900, HB DBL=720+440=1160, note="Supp Repas 220 pp added"
+   - If the supplement is ONLY mentioned in a footnote or separate text (not a column in the rate table), just note it in the BB row's "note" field without creating HB rows.
+   - CRITICAL: When a table has BOTH "1/2 DBL BB occupancy 380" AND "1/2 DBL HB occupancy 480" as separate lines with separate numeric rates, these are TWO explicit rates — extract BOTH as separate rows. Do NOT skip one just because they are in the same section.
+   - When the supplement column value appears in only ONE season row but is clearly a flat rate (not varying by season), apply it to ALL seasons.
+14. **TOURIST TAX / TAXE DE SÉJOUR** (IMPORTANT — ALWAYS add per person):
+   - ALWAYS add taxes (taxe de séjour, tourist tax, city tax, taxe de promotion touristique, taxe communale) to prices PER PERSON.
+   - Tax is per person per night: add to SGL as-is, add to DBL/TWN as tax×2.
+   - Example: rate = 900 MAD, tax = 25 MAD pp/pn → single_price = 925, double_price = 950, note = "Tax 25 pp/pn added"
+   - When converting per-person rates: add tax to per-person rate BEFORE converting to per-room.
+   - Example: pp=480, sgl_supp=400, tax=17.6 pp → effective_pp=497.6, DBL=497.6×2=995.2, SGL=497.6+400=897.6, note = "Tax 17.6 pp/pn added"
+   - EXCEPTION: If the document explicitly says taxes are INCLUDED ("TTC", "taxes incluses", "tax included", "toutes taxes comprises"), do NOT add — just note "taxes included".
 15. **SUITE / SINGLE-RATE ROOMS** (IMPORTANT):
    - When a room type (Suite, Junior Suite, etc.) has only ONE rate listed in the document (not split by SGL/DBL), this means it is a flat PER-ROOM rate.
    - Set BOTH single_price AND double_price to that same rate (the room costs the same whether 1 or 2 guests).
    - twin_price should also be the same rate.
    - Example: "Suite Junior: 970" → single_price = 970, double_price = 970, twin_price = 970
+16. **ROOM UPGRADE SUPPLEMENTS** (do NOT create separate rows):
+   - "Supp. Suite", "Supp. Suite Junior", "Supplément Suite" = upgrade supplement from Standard to Suite. Do NOT create Suite rows from these — just note the supplement amount in the Standard row's "note" field.
+   - Only create Suite/Junior Suite rows if the document lists ABSOLUTE rates for that room type (e.g., "Suite Junior: 1200 MAD" or "Suite Junior BB/HB: 970/1150").
 
 NORMALISATION:
 - Dates must be YYYY-MM-DD format. If only month name given, use first/last day of month.
@@ -278,12 +321,12 @@ SELF-VALIDATION CHECKLIST — before outputting, verify every row against these 
 □ TWN ≈ DBL (usually equal or very close)
 □ No zero prices (set to null instead)
 □ Suite/premium rooms with only one rate → set single_price = double_price = that rate
-□ Taxes NEVER added to prices — note them separately
+□ Taxes ADDED per person to prices (unless document says "TTC"/"taxes incluses")
 □ HB/DP rows only if document has EXPLICIT HB rates (not computed from supplement)
 □ Meal plan codes normalized (BB/HB/FB/AI/RO)
 □ Stars is integer 1-5 or null
 □ room_desc is never "Single"/"Double"/"Triple" (those are occupancy, not room types)
-□ fit_git is "FIT" or "GIT"
+□ fit_git is "FIT", "GIT", or "Series"
 
 RESPOND ONLY with a valid JSON array. No backticks. No explanation. No preamble.
 
@@ -295,7 +338,7 @@ Schema for each row:
   "stars": integer or null,
   "hotel_type": "Hotel / Riad / Kasbah / etc or null",
   "meal_plan": "BB / HB / FB / AI / RO or null",
-  "fit_git": "FIT / GIT or null",
+  "fit_git": "FIT / GIT / Series or null",
   "season_code": "season label or code",
   "date_ranges": [{{"date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD"}}],
   "double_price": number or null,
@@ -336,7 +379,7 @@ CHECK FOR:
    - TWN rate very different from DBL (usually should be equal or close)
    - Rates of 0 (likely extraction error, not a real zero rate) — set to null
    - **SUITE / SINGLE-RATE ROOMS**: If a Suite, Junior Suite, or similar premium room type has double_price but single_price is null, set single_price = double_price (suites are per-room rates, same price for 1 or 2 guests)
-   - **TAX CHECK**: Taxes should NEVER be added to prices. If you see prices that have tax baked in but the source document shows rates "HT" (hors taxe) or lists tax separately, REMOVE the tax from the prices and note it instead. Prices must match what the document states.
+   - **TAX CHECK**: Taxes (taxe de séjour, city tax, etc.) should ALWAYS be added per person to prices, unless the document says "TTC" / "taxes incluses". If tax is listed separately but not yet added to prices, ADD it per person (SGL += tax, DBL += tax×2).
    - **SUPPLEMENT CHECK**: If you see HB/DP rows that were COMPUTED by adding a supplement to BB prices (and the document doesn't list explicit HB rates), REMOVE those rows. Note the supplement in the BB row's note field instead.
 
 3. COMPLETENESS
@@ -471,7 +514,7 @@ class AiParser(BaseParser):
 
     @staticmethod
     def _extract_pdf_text(pdf_path: Path) -> str:
-        """Extract text from a PDF for grounding checks."""
+        """Extract text from a PDF with structured table formatting."""
         try:
             import pdfplumber
             text_parts = []
@@ -479,17 +522,30 @@ class AiParser(BaseParser):
                 for page in pdf.pages:
                     page_text = page.extract_text() or ""
                     text_parts.append(page_text)
-                    # Also extract table text
+                    # Extract tables as markdown for clearer structure
                     for table in page.extract_tables() or []:
-                        for row in table:
-                            if row:
-                                cells = [str(c) for c in row if c]
-                                if cells:
-                                    text_parts.append(" | ".join(cells))
-            return "\n".join(text_parts)
+                        if not table or len(table) < 2:
+                            continue
+                        text_parts.append("\n[TABLE]")
+                        for i, row in enumerate(table):
+                            if not row:
+                                continue
+                            cells = [str(c).replace("\n", " ").strip() if c else "" for c in row]
+                            if not any(cells):
+                                continue
+                            text_parts.append("| " + " | ".join(cells) + " |")
+                            if i == 0:
+                                text_parts.append("|" + "|".join(["---"] * len(cells)) + "|")
+                        text_parts.append("[/TABLE]\n")
+            from app.parsers.scanned_fallback import with_fallback
+            return with_fallback(pdf_path, "\n".join(text_parts))
         except Exception as e:
             logger.warning("Could not extract PDF text for grounding: %s", e)
-            return ""
+            try:
+                from app.parsers.scanned_fallback import ocr_text
+                return ocr_text(pdf_path)
+            except Exception:
+                return ""
 
     def _parse_json(self, raw: str) -> list[dict]:
         """Extract JSON array from response, handling markdown fences and truncation."""

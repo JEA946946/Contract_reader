@@ -19,9 +19,22 @@ class Settings(BaseSettings):
 
     google_places_api_key: str = ""
 
-    allowed_origins: str = "http://localhost:5173,http://localhost:3000,http://localhost:5174,http://localhost:8005"
+    api_key: str = ""
+
+    allowed_origins: str = "http://localhost:5173,http://localhost:3000,http://localhost:5174,http://localhost:8005,https://crm.vmmorocco.com"
 
     # AI parser settings
+    # The switch that was missing when the API account was emptied. Every call
+    # into Claude passes through claude_sdk._invoke(), so turning this off stops
+    # all of them -- uploads and the mail poller alike.
+    ai_enabled: bool = True
+    # An inbox with 200 unread attachments used to become 200 AI runs in one
+    # unattended poll. Whatever is left over waits for the next round.
+    poll_max_emails_per_run: int = 20
+    # Polling fetches and stores; it does not run AI. Documents from email wait
+    # as `pending_extraction` until a person starts them. Fetching is free,
+    # extracting is not, and nobody is watching at 03:00.
+    poll_auto_extract: bool = False
     ai_validation_pass_enabled: bool = False  # Set True to re-enable separate Pass 3
 
     # Pipeline optimization

@@ -99,13 +99,16 @@ class DocumentTruncator:
                     page = pdf.pages[page_idx]
                     page_text = page.extract_text() or ""
 
-                    # Also include table data
+                    # Also include table data as markdown tables for better AI comprehension
                     for table in page.extract_tables() or []:
-                        for row in table:
-                            if row:
-                                cells = [str(c) for c in row if c]
-                                if cells:
-                                    page_text += "\n" + " | ".join(cells)
+                        if table and len(table) >= 1:
+                            for row_idx, row in enumerate(table):
+                                if row:
+                                    cells = [str(c).strip() if c else "" for c in row]
+                                    if any(cells):
+                                        page_text += "\n| " + " | ".join(cells) + " |"
+                                        if row_idx == 0:
+                                            page_text += "\n|" + "|".join(["---"] * len(cells)) + "|"
 
                     if page_text.strip():
                         text_parts.append(f"[Page {page_idx + 1}]\n{page_text}")
@@ -125,26 +128,136 @@ class DocumentTruncator:
 #  Module 2: HaikuExtractor
 # ============================================================
 
-HAIKU_EXTRACTION_PROMPT = """You are a hotel contract data extraction engine.
+HAIKU_EXTRACTION_PROMPT = """You are a hotel contract data extraction engine for a Moroccan DMC.
 
 Extract ALL rate data from this document into a JSON array.
 
-RULES:
+CRITICAL RULES:
+
 1. One row per hotel × room_type × season × meal_plan combination
-2. Normalize dates to YYYY-MM-DD format
-3. Convert per-person rates to per-room:
+2. Normalize dates to YYYY-MM-DD format. Date ranges MUST have both date_from AND date_to.
+3. **PER-PERSON / "½ DOUBLE" CONVERSION** (CRITICAL):
+   - "½ chambre double", "½ double", "1/2 chambre double", "per person", "pp/pn", "par personne" = PER-PERSON rate
    - DBL/TWN = per_person_rate × 2
-   - SGL = per_person_rate + single_supplement
+   - SGL = per_person_rate + single_supplement (NOT double_price + supplement!)
+   - Always note original per-person rate and calculation in "note" field
 4. Apply single supplements inline to single_price
-5. Meal plans: BB, HB, FB, AI, RO
-6. Season codes: L (low), H (high), M (mid), P (peak), Annual
-7. Strip currency symbols from prices
-8. Stars as integer (1-5) or null
-9. room_desc should be the room type name (Std, Superior, Suite, etc.)
-   Never use "Single"/"Double" as room_desc — those are occupancy types
-10. Set fit_git to "FIT" or "GIT"
-11. Do NOT add taxes to prices — note them separately
-12. Only create meal plan rows if the document has EXPLICIT rates for that meal plan
+5. Meal plans: "Petit déjeuner"/"B&B"/"PD" → "BB", "Demi-pension"/"DP" → "HB", "Pension complète"/"PC" → "FB", "All Inclusive"/"Tout compris" → "AI", "Room Only" → "RO"
+6. Strip currency symbols from prices
+7. Stars as integer (1-5) or null
+8. room_desc = room TYPE name (Std, Superior, Suite, Junior Suite, Deluxe, etc.)
+   NEVER use "Single"/"Double"/"Triple" as room_desc — those are OCCUPANCY types, not room types.
+   "Chambre Single" and "Chambre Double" are the SAME "Std" room with 1 or 2 guests → merge into ONE row.
+9. Set fit_git to "FIT", "GIT", or "Series".
+    - "FIT" = individual/corporate rates, "INDIVIDUELS", "FIT", "CORPORATE", "GROUPES SPECIAUX"
+    - "GIT" = group inclusive tour (small groups, 10-20 pax)
+    - "Series" = circuit/series rates (regular group departures), labeled "CIRCUITS ET SERIES", "SERIES (LOISIR)", "séries"
+10. **TAXES** (IMPORTANT): ALWAYS add taxes (taxe de séjour, taxe communale, taxe de promotion touristique, city tax, tourist tax) to prices PER PERSON.
+    - Tax is per person per night: add to SGL as-is, add to DBL/TWN as tax×2
+    - Example: rate=900, tax=25 pp/pn → SGL=925, DBL=950, note="Tax 25 pp/pn added"
+    - EXCEPTION: If the document explicitly says taxes are INCLUDED ("TTC", "taxes incluses", "tax included"), do NOT add — just note it.
+    - When converting per-person rates: add tax to the per-person rate BEFORE converting to per-room.
+      Example: pp=480, tax=17.6 pp → effective_pp=497.6, DBL=497.6×2=995.2, SGL=497.6+supp
+11. **MEAL PLAN ROWS**:
+    - If document has EXPLICIT RATES for HB (e.g., "HB: 690 pp" or "1/2 DBL HB ... 480"), create HB rows directly.
+    - If a meal supplement appears as a DEDICATED COLUMN in the rate table (e.g., "Supp. Repas", "Supplément Repas"),
+      COMPUTE HB rows by adding the supplement to BB rates. Supplement is typically per person: add once to SGL, add ×2 to DBL.
+      Example: BB SGL=680, DBL=720, Supp Repas=220 pp → HB SGL=900, HB DBL=1160
+    - If the supplement is only in a footnote (not a table column), just note it in the BB row.
+    - CRITICAL: When a table has BOTH "1/2 DBL BB ... 380" AND "1/2 DBL HB ... 480" as separate lines,
+      extract BOTH as separate rows.
+    - When a supplement column value appears in only ONE row but is a flat rate, apply to ALL seasons.
+12. Cross-reference season names to their date definitions elsewhere in the document.
+13. Suite/premium rooms with only ONE rate listed → set single_price = double_price = twin_price = that rate (flat per-room rate).
+
+EXAMPLES:
+
+--- Example 1: Per-person pricing with single supplement ---
+Input: "HOTEL DIWAN – Rabat ****
+Tarif en BB: Basse Saison: ½ Chambre Double 350 MAD / Supplément Single 250 MAD
+Haute Saison: ½ Chambre Double 450 MAD / Supplément Single 300 MAD
+Supplément Demi-Pension: 130 MAD par personne"
+
+Output:
+[
+  {{"accommodation":"Diwan","city":"Rabat","room_desc":"Std","stars":4,"meal_plan":"BB",
+   "season_code":"L","date_ranges":[],"single_price":600,"double_price":700,"twin_price":700,
+   "fit_git":"FIT","note":"½ dbl=350 pp. DBL=350×2=700. SGL=350+250=600. HB supp 130 pp available."}},
+  {{"accommodation":"Diwan","city":"Rabat","room_desc":"Std","stars":4,"meal_plan":"BB",
+   "season_code":"H","date_ranges":[],"single_price":750,"double_price":900,"twin_price":900,
+   "fit_git":"FIT","note":"½ dbl=450 pp. DBL=450×2=900. SGL=450+300=750. HB supp 130 pp available."}}
+]
+
+--- Example 2: Multiple explicit meal plans (per-person) ---
+Input: "HOTEL BEACH CLUB ****
+Prix net par personne en chambre double
+SAISON A: 01.05.2026/30.06.2026  |  SAISON C: 01.07.2026/31.08.2026
+BB | 480 | —
+DP | 690 | 860
+Supplément single/jour | 400 | 400"
+
+Output:
+[
+  {{"accommodation":"Beach Club","city":"","room_desc":"Std","stars":4,"meal_plan":"BB",
+   "season_code":"A","date_ranges":[{{"date_from":"2026-05-01","date_to":"2026-06-30"}}],
+   "single_price":880,"double_price":960,"twin_price":960,"fit_git":"FIT",
+   "note":"pp=480, sgl_supp=400. DBL=480×2=960. SGL=480+400=880."}},
+  {{"accommodation":"Beach Club","city":"","room_desc":"Std","stars":4,"meal_plan":"HB",
+   "season_code":"A","date_ranges":[{{"date_from":"2026-05-01","date_to":"2026-06-30"}}],
+   "single_price":1090,"double_price":1380,"twin_price":1380,"fit_git":"FIT",
+   "note":"pp=690, sgl_supp=400. DBL=690×2=1380. SGL=690+400=1090."}},
+  {{"accommodation":"Beach Club","city":"","room_desc":"Std","stars":4,"meal_plan":"HB",
+   "season_code":"C","date_ranges":[{{"date_from":"2026-07-01","date_to":"2026-08-31"}}],
+   "single_price":1260,"double_price":1720,"twin_price":1720,"fit_git":"FIT",
+   "note":"pp=860, sgl_supp=400. DBL=860×2=1720. SGL=860+400=1260."}}
+]
+
+--- Example 3: Compact per-room rates ---
+Input: "Hotel Kenzi Tower, Casablanca ****
+BB rates: 01/01–28/02 (Low): SGL 850 / DBL 1100 / TWN 1100 MAD
+CHD 2-11: 50% of DBL | Baby 0-2: FOC"
+
+Output:
+[
+  {{"accommodation":"Kenzi Tower","city":"Casablanca","room_desc":"Std","stars":4,"meal_plan":"BB",
+   "season_code":"L","date_ranges":[{{"date_from":"2026-01-01","date_to":"2026-02-28"}}],
+   "single_price":850,"double_price":1100,"twin_price":1100,
+   "baby_discount":"FREE","child_discount":"50% of DBL","fit_git":"FIT"}}
+]
+
+--- Example 4: BB and HB as SEPARATE explicit rates in the same table section ---
+Input: "INDIVIDUELS  1/2 DBL BB occupancy  NET RATE  380  420
+Superior     1/2 DBL HB occupancy  NET RATE  480  520
+             Supp Single  NET RATE            300  320"
+(Columns are: Low Season / High Season)
+
+CRITICAL: Both "1/2 DBL BB ... 380/420" and "1/2 DBL HB ... 480/520" are EXPLICIT rates.
+Extract BOTH — do NOT skip the HB line!
+
+Output (4 rows: BB×2 + HB×2):
+[
+  {{"accommodation":"...","room_desc":"Superior","meal_plan":"BB","season_code":"L",
+   "double_price":760,"single_price":680,"twin_price":760,"fit_git":"FIT",
+   "note":"½ dbl pp=380. DBL=380×2=760. SGL=380+300=680."}},
+  {{"accommodation":"...","room_desc":"Superior","meal_plan":"BB","season_code":"H",
+   "double_price":840,"single_price":740,"twin_price":840,"fit_git":"FIT",
+   "note":"½ dbl pp=420. DBL=420×2=840. SGL=420+320=740."}},
+  {{"accommodation":"...","room_desc":"Superior","meal_plan":"HB","season_code":"L",
+   "double_price":960,"single_price":780,"twin_price":960,"fit_git":"FIT",
+   "note":"½ dbl pp=480. DBL=480×2=960. SGL=480+300=780."}},
+  {{"accommodation":"...","room_desc":"Superior","meal_plan":"HB","season_code":"H",
+   "double_price":1040,"single_price":840,"twin_price":1040,"fit_git":"FIT",
+   "note":"½ dbl pp=520. DBL=520×2=1040. SGL=520+320=840."}}
+]
+
+SELF-VALIDATION — before outputting, verify:
+□ SGL should NOT exceed DBL (likely unconverted per-person rate if so)
+□ If per-person: DBL = pp×2, SGL = pp+supp (NOT DBL+supp)
+□ TWN ≈ DBL (usually equal)
+□ No zero prices (use null)
+□ Taxes ADDED per person (unless document says "TTC"/"taxes incluses")
+□ HB/DP rows only if EXPLICIT rates exist (not computed from supplement)
+□ room_desc is never "Single"/"Double"/"Triple"
 
 RESPOND ONLY with a valid JSON array. No backticks. No explanation.
 
@@ -209,11 +322,52 @@ class HaikuExtractor:
         if not data:
             return {"rows": [], "confidence": 0.0}
 
-        # Calculate average confidence
+        # Calculate average confidence from self-reported values
         confidences = [r.pop("confidence", 0.5) for r in data]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
-        return {"rows": data, "confidence": avg_confidence}
+        # Structural validation: filter invalid rows and recalculate confidence
+        valid_rows, structural_confidence = self._validate_rows(data)
+        if len(valid_rows) < len(data):
+            logger.info(
+                "Haiku structural validation: %d/%d rows valid (structural_confidence=%.2f)",
+                len(valid_rows), len(data), structural_confidence,
+            )
+
+        # Use the lower of self-reported and structural confidence
+        final_confidence = min(avg_confidence, structural_confidence) if valid_rows else 0.0
+
+        return {"rows": valid_rows, "confidence": final_confidence}
+
+    @staticmethod
+    def _validate_rows(rows: list[dict]) -> tuple[list[dict], float]:
+        """Validate and filter extracted rows, return (valid_rows, structural_confidence).
+
+        Filters out:
+        - Rows with no prices AND no accommodation name
+        - Rows where all price fields are null/zero
+
+        Structural confidence = fraction of rows that have BOTH a price and a name.
+        """
+        price_fields = ("double_price", "single_price", "twin_price", "triple_price", "quadruple_price")
+        valid = []
+        for r in rows:
+            has_price = any(r.get(f) for f in price_fields)
+            has_name = bool((r.get("accommodation") or "").strip())
+            # Keep row if it has at least a price or a name
+            if has_price or has_name:
+                valid.append(r)
+
+        if not valid:
+            return [], 0.0
+
+        # Structural confidence: what fraction have BOTH price AND name
+        full = sum(
+            1 for r in valid
+            if any(r.get(f) for f in price_fields)
+            and (r.get("accommodation") or "").strip()
+        )
+        return valid, full / len(valid)
 
     @staticmethod
     def _parse_json(raw: str) -> list[dict]:
@@ -638,7 +792,11 @@ class OptimizedDocumentProcessor:
             except Exception:
                 pass
 
-        return "\n".join(text_parts) if text_parts else None
+        joined = "\n".join(text_parts) if text_parts else None
+        if file_type == "pdf":
+            from app.parsers.scanned_fallback import with_fallback
+            return with_fallback(file_path, joined) or None
+        return joined
 
     def _sonnet_fallback(
         self, file_path: Path, file_type: str, truncated_text: str | None
