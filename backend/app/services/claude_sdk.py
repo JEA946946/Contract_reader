@@ -46,14 +46,23 @@ def _check_credentials() -> None:
         raise RuntimeError(f"Invalid credentials file: {exc}") from exc
 
 
-def call_claude_sdk(prompt: str, system_prompt: str = "") -> str:
-    """Send a prompt to Claude via the Agent SDK using subscription billing.
+def _check_ai_enabled() -> None:
+    """The same switch the API path uses — defined once, in billing."""
+    from app.services.billing import check_ai_enabled
 
-    This is a synchronous wrapper around the async SDK ``query()`` function.
-    It temporarily removes ``ANTHROPIC_API_KEY`` and ``CLAUDE_CODE_OAUTH_TOKEN``
-    from the environment so the CLI reads credentials from
-    ``~/.claude/.credentials.json``.
+    check_ai_enabled()
+
+
+def _invoke(prompt: str, build_options) -> str:
+    """Run one prompt through the Agent SDK on subscription billing.
+
+    Shared by every public call below. ``build_options`` receives the
+    ``ClaudeAgentOptions`` class and returns a configured instance, so callers
+    can differ in tools and turns without each repeating the credential
+    handling, the environment stripping and the event-loop dance.
     """
+    _check_ai_enabled()
+
     # Check credentials before spawning the CLI subprocess
     _check_credentials()
 
@@ -71,12 +80,7 @@ def call_claude_sdk(prompt: str, system_prompt: str = "") -> str:
             os.environ["HOME"] = fallback_home
 
         try:
-            options = ClaudeAgentOptions(
-                system_prompt=system_prompt or None,
-                max_turns=1,
-                allowed_tools=[],
-                permission_mode="bypassPermissions",
-            )
+            options = build_options(ClaudeAgentOptions)
 
             parts: list[str] = []
             async for message in query(prompt=prompt, options=options):
@@ -107,3 +111,60 @@ def call_claude_sdk(prompt: str, system_prompt: str = "") -> str:
             return pool.submit(asyncio.run, _run()).result()
     else:
         return asyncio.run(_run())
+
+
+def call_claude_sdk(prompt: str, system_prompt: str = "") -> str:
+    """Send a text prompt to Claude via the Agent SDK using subscription billing."""
+    return _invoke(
+        prompt,
+        lambda Options: Options(
+            system_prompt=system_prompt or None,
+            max_turns=1,
+            allowed_tools=[],
+            permission_mode="bypassPermissions",
+        ),
+    )
+
+
+def call_claude_sdk_with_file(
+    prompt: str,
+    file_path,
+    system_prompt: str = "",
+    max_turns: int = 6,
+) -> str:
+    """Same, but Claude opens the document itself instead of being sent it.
+
+    The restaurant and transport parsers need Claude to *see* a PDF — a menu or a
+    tariff table read as flat text loses the columns that give the numbers their
+    meaning. Their way of doing that was to base64 the file into an API request,
+    which is what spent the money.
+
+    Handing the CLI the ``Read`` tool and the directory the file sits in gets the
+    same document in front of the same model, billed to the subscription. Read
+    handles PDFs directly, so no conversion happens on our side.
+
+    Access is granted to one directory, not the filesystem: ``add_dirs`` and
+    ``cwd`` are both the file's own folder, and ``Read`` is the only tool
+    allowed. Several turns are needed — one to call the tool, one to answer, and
+    slack for a multi-page document — where a text prompt needs exactly one.
+    """
+    from pathlib import Path
+
+    path = Path(file_path).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Nothing to read at {path}")
+
+    folder = str(path.parent)
+    instruction = f"Read the file `{path.name}` in the current directory, then:\n\n{prompt}"
+
+    return _invoke(
+        instruction,
+        lambda Options: Options(
+            system_prompt=system_prompt or None,
+            max_turns=max_turns,
+            allowed_tools=["Read"],
+            permission_mode="bypassPermissions",
+            cwd=folder,
+            add_dirs=[folder],
+        ),
+    )

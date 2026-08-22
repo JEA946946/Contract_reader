@@ -193,11 +193,8 @@ No backticks. No explanation."""
 class RestaurantAiParser:
     def parse_pdf(self, pdf_path: Path) -> list[ParsedMenuRow]:
         """Parse a restaurant PDF using vision-based Claude."""
-        if not settings.anthropic_api_key or settings.anthropic_api_key == "your-api-key-here":
-            raise RuntimeError("Anthropic API key not configured")
-
-        import anthropic
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        from app.services.billing import anthropic_client
+        client = anthropic_client()
 
         pdf_bytes = pdf_path.read_bytes()
         pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
@@ -206,6 +203,11 @@ class RestaurantAiParser:
             "source": {"type": "base64", "media_type": "application/pdf", "data": pdf_b64},
         }
 
+        # Two passes, and measured that way. Merging them into one reply
+        # saved 35-38% of the input tokens and cost rows: over three runs on
+        # three documents the merged version returned 6, 25, 6 rows where
+        # this returns 25 every time, and 23, 23, 16 where this returns 23.
+        # A menu line missing from a quotation costs more than the tokens.
         # Pass 1: Analysis
         logger.info("Restaurant Parser (vision) — Pass 1: Analysing document structure")
         analysis = self._call_claude_with_content(
@@ -256,11 +258,8 @@ class RestaurantAiParser:
 
     def parse_text(self, text: str) -> list[ParsedMenuRow]:
         """Parse restaurant text content."""
-        if not settings.anthropic_api_key or settings.anthropic_api_key == "your-api-key-here":
-            raise RuntimeError("Anthropic API key not configured")
-
-        import anthropic
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        from app.services.billing import anthropic_client
+        client = anthropic_client()
 
         if len(text) > 80000:
             text = text[:80000] + "\n... (truncated)"

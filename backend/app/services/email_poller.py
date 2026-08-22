@@ -108,7 +108,21 @@ def _poll_inbox(db) -> None:
 
         _status, data = imap.search(None, "UNSEEN")
         email_ids = data[0].split() if data[0] else []
-        logger.info("Found %d unseen emails", len(email_ids))
+
+        # Bounded on purpose. Every attachment here can start an AI run, and this
+        # loop is unattended -- a backlog used to turn into one long burst with
+        # nobody watching it. The remainder stays UNSEEN and is picked up next
+        # round, so nothing is lost, it just arrives at a rate someone could stop.
+        cap = max(1, settings.poll_max_emails_per_run)
+        held_back = max(0, len(email_ids) - cap)
+        if held_back:
+            logger.warning(
+                "Found %d unseen emails — processing %d this round, %d left for next",
+                len(email_ids), cap, held_back,
+            )
+            email_ids = email_ids[:cap]
+        else:
+            logger.info("Found %d unseen emails", len(email_ids))
 
         for eid in email_ids:
             try:
@@ -195,23 +209,40 @@ def _process_single_email(imap, email_id: bytes, db) -> None:
     # Parse via existing pipeline
     status = "processed"
     notes = None
-    try:
-        rows = parse_document(eml_path, document, db)
-        document.row_count = len(rows)
-        if rows:
-            document.status = "pending_review"
-            notes = f"Parsed {len(rows)} price rows from email"
-        else:
-            document.status = "pending_review"
-            notes = "No price data extracted from email"
+
+    # The mail is kept; the AI is not started.
+    #
+    # This loop is unattended and runs every few minutes. Extracting here meant
+    # every supplier mail that landed spent money on a model whether or not
+    # anyone wanted that document read -- which is how a whole account went in
+    # one go. Fetching costs nothing, so the mail and its attachments are stored
+    # as they always were, and the document waits with `pending_extraction`
+    # until someone presses Extract (POST /documents/{id}/ai-reparse).
+    #
+    # Set `poll_auto_extract = True` to get the old behaviour back.
+    if not settings.poll_auto_extract:
+        document.status = "pending_extraction"
+        document.row_count = 0
+        notes = "Stored from email — waiting for someone to start the extraction"
         db.commit()
-    except Exception as e:
-        status = "failed"
-        notes = f"Parsing error: {e}"
-        document.status = "failed"
-        document.notes = str(e)
-        db.commit()
-        logger.error("Parsing failed for email %s: %s", message_id, e)
+    else:
+        try:
+            rows = parse_document(eml_path, document, db)
+            document.row_count = len(rows)
+            if rows:
+                document.status = "pending_review"
+                notes = f"Parsed {len(rows)} price rows from email"
+            else:
+                document.status = "pending_review"
+                notes = "No price data extracted from email"
+            db.commit()
+        except Exception as e:
+            status = "failed"
+            notes = f"Parsing error: {e}"
+            document.status = "failed"
+            document.notes = str(e)
+            db.commit()
+            logger.error("Parsing failed for email %s: %s", message_id, e)
 
     # Auto-extract entity name and city from first lines of body_text
     # Typical format: line 1 = name, line 2 = blank, line 3 = city

@@ -15,7 +15,9 @@ from app.models import Document, ExtractionFeedback
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+from app.auth import require_api_key
+
+router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_api_key)])
 
 
 class AppSettings(BaseModel):
@@ -254,12 +256,13 @@ def get_anthropic_settings():
 def update_anthropic_settings(body: AnthropicSettingsUpdate):
     actual_key = body.anthropic_api_key if body.anthropic_api_key else settings.anthropic_api_key
     settings.anthropic_api_key = actual_key
-    env_updates: dict[str, str] = {}
-    if body.anthropic_api_key:
-        env_updates["ANTHROPIC_API_KEY"] = body.anthropic_api_key
-    if env_updates:
-        _update_env_file(env_updates)
-    logger.info("Anthropic settings updated")
+    # Deliberately not written to .env any more. This endpoint used to put
+    # ANTHROPIC_API_KEY into the environment, which is the one thing that could
+    # switch paid billing back on from outside the code -- and nothing reads the
+    # key now except app.services.billing, which refuses without an explicit
+    # opt-in. The value is still held in memory so the masked display keeps
+    # working and an operator can see what is configured.
+    logger.info("Anthropic settings updated (not persisted: Reader is subscription-billed)")
     return AnthropicSettingsResponse(
         anthropic_api_key_display=_mask_key(settings.anthropic_api_key),
     )

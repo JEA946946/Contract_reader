@@ -80,11 +80,8 @@ def _classify_with_claude(text: str) -> str:
     """Use a short Claude call to classify ambiguous documents."""
     try:
         from app.config import settings
-        if not settings.anthropic_api_key or settings.anthropic_api_key == "your-api-key-here":
-            return "hotel"
-
-        import anthropic
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        from app.services.billing import anthropic_client
+        client = anthropic_client()
 
         snippet = text[:3000]
         response = client.messages.create(
