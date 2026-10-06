@@ -206,6 +206,12 @@ class ManualPriceRowSchema(BaseModel):
     season_code: Optional[str] = None
     date_ranges: List[ParsedDateRangeSchema] = []
     note: Optional[str] = None
+    # Not edited on the price screens, but sent back as they were: without
+    # them, saving a hotel wiped the discounts and minimum stay the contract
+    # reader had found.
+    baby_discount: Optional[str] = None
+    child_discount: Optional[str] = None
+    min_stay: Optional[int] = None
 
 
 class CreateHotelWithPricesRequest(BaseModel):

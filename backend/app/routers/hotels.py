@@ -37,6 +37,9 @@ def _save_price_rows(rows: list[ManualPriceRowSchema], hotel_id: int, db: Sessio
             fit_git=row.fit_git,
             season_code=row.season_code,
             note=row.note,
+            baby_discount=row.baby_discount,
+            child_discount=row.child_discount,
+            min_stay=row.min_stay,
         )
         db.add(price)
         db.flush()
