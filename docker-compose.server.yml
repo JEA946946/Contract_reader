@@ -45,7 +45,7 @@ services:
       - ALLOWED_ORIGINS=https://reader.vmmorocco.com,https://crm.vmmorocco.com
       - CMR_API_BASE=http://dmc_cmr_django_local_django:8000/api/v1
       - CMR_API_TOKEN=${CMR_API_TOKEN}
-      - API_KEY=${API_KEY}   # must exist in .env on the server -- it is NOT there yet
+      - API_KEY=${API_KEY}   # from .env on the server
       - GOOGLE_PLACES_API_KEY=${GOOGLE_PLACES_API_KEY:-}
       - REDIS_URL=redis://hotelprice_reader_redis:6379
     volumes:
